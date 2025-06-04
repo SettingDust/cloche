@@ -1,5 +1,6 @@
 package earth.terrarium.cloche.target
 
+import earth.terrarium.cloche.ClocheExtension
 import earth.terrarium.cloche.ModTransformationStateAttribute
 import earth.terrarium.cloche.PublicationSide
 import earth.terrarium.cloche.SIDE_ATTRIBUTE
@@ -17,9 +18,11 @@ import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
 import net.msrandom.minecraftcodev.remapper.RemapAction
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import net.msrandom.minecraftcodev.remapper.task.RemapJar
+import net.msrandom.minecraftcodev.runs.task.GenerateModOutputs
 import org.gradle.api.Action
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ArtifactView
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.gradle.api.attributes.AttributeContainer
@@ -32,12 +35,15 @@ import org.gradle.api.tasks.TaskProvider
 import org.gradle.jvm.tasks.Jar
 import org.spongepowered.asm.mixin.MixinEnvironment
 import javax.inject.Inject
+import kotlin.io.relativeTo
 
-internal fun Project.getModFiles(
-    configurationName: String,
-    isTransitive: Boolean = true,
-    configure: Action<ArtifactView.ViewConfiguration>? = null
-): FileCollection {
+internal object States {
+    const val INCLUDES_EXTRACTED = "includesExtracted"
+    const val MIXINS_STRIPPED = "mixinsStripped"
+    const val REMAPPED = "remapped"
+}
+
+internal fun Project.getModFiles(configurationName: String, isTransitive: Boolean = true, configure: Action<ArtifactView.ViewConfiguration>? = null): FileCollection {
     val classpath = project.configurations.named(configurationName)
 
     val modDependencies = project.configurations.named(modConfigurationName(configurationName))
@@ -51,8 +57,10 @@ internal fun Project.getModFiles(
             resolutionResult.root.dependencies.filterIsInstance<ResolvedDependencyResult>().map { it.selected.id }
         }
 
+        val filteredIdentifiers = componentIdentifiers.filter { it !is ProjectComponentIdentifier }
+
         classpath.incoming.artifactView {
-            it.componentFilter(componentIdentifiers::contains)
+            it.componentFilter(filteredIdentifiers::contains)
 
             configure?.execute(it)
         }.files
@@ -68,13 +76,20 @@ internal fun registerCompilationTransformations(
     side: MixinEnvironment.Side,
     attributeCompilationName: String = compilationName
 ): Triple<TaskProvider<AccessWiden>, TaskProvider<Mixin>, Provider<RegularFile>> {
+    val outputDirectory = target.outputDirectory.map { it.dir(compilationName) }
+
     val collapsedName = compilationName.takeUnless { it == SourceSet.MAIN_SOURCE_SET_NAME }
     val collapsedAttributeName = attributeCompilationName.takeUnless { it == SourceSet.MAIN_SOURCE_SET_NAME }
 
     val project = target.project
 
     val accessWidenTask = project.tasks.register(
-        lowerCamelCaseGradleName("accessWiden", target.featureName, collapsedName, "minecraft"),
+        lowerCamelCaseGradleName(
+            "accessWiden",
+            target.featureName,
+            collapsedName,
+            "minecraft",
+        ),
         AccessWiden::class.java,
     ) {
         it.group = "minecraft-transforms"
@@ -89,6 +104,9 @@ internal fun registerCompilationTransformations(
                     lowerCamelCaseName(target.featureName, collapsedAttributeName, ModTransformationStateAttribute.REMAPPED)
                 )
             }
+        })
+        it.outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
+            dir.file(file.asFile.name)
         })
     }
 
@@ -160,6 +178,10 @@ internal fun registerCompilationTransformations(
         it.inputFile.set(finalMinecraftFile)
         it.classpath.from(project.configurations.named(sourceSet.compileClasspathConfigurationName))
         it.classpath.from(extraClasspathFiles)
+
+        it.outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
+            dir.file("${file.asFile.nameWithoutExtension}-sources.${file.asFile.extension}")
+        })
     }
 
     return Triple(accessWidenTask, mixinTask, decompile.flatMap(Decompile::outputFile))
@@ -252,6 +274,18 @@ private fun setupModTransformationPipeline(
     }
 }
 
+private fun GenerateModOutputs.addSourceSet(sourceSet: SourceSet) {
+    val rootDirectory = project.rootProject.layout.projectDirectory.asFile
+
+    paths.addAll(project.provider {
+        sourceSet.output.classesDirs.map {
+            it.relativeTo(rootDirectory).path
+        }
+    })
+
+    paths.add(sourceSet.output.resourcesDir!!.relativeTo(rootDirectory).path)
+}
+
 internal abstract class TargetCompilation
 @Inject
 constructor(
@@ -275,6 +309,24 @@ constructor(
         side
     )
 
+    val generateModOutputs: TaskProvider<GenerateModOutputs> = project.tasks.register(
+        lowerCamelCaseGradleName("generate", sourceSet.takeUnless(SourceSet::isMain)?.name, "modOutputs"),
+        GenerateModOutputs::class.java,
+    ) {
+        it.modId.set(project.extension<ClocheExtension>().metadata.modId)
+
+        // TODO Make this logic a bit better;
+        //   The way it should go is as follows:
+        //     data - main + data
+        //     client - main + client
+        //     clientData - main + client + data + clientData
+        if (name != SourceSet.MAIN_SOURCE_SET_NAME) {
+            it.addSourceSet(target.main.sourceSet)
+        }
+
+        it.addSourceSet(sourceSet)
+    }
+
     val finalMinecraftFile: Provider<RegularFile> = setupFiles.second.flatMap(Mixin::outputFile)
     val sources = setupFiles.third
 
@@ -282,6 +334,8 @@ constructor(
         lowerCamelCaseGradleName(sourceSet.takeUnless(SourceSet::isMain)?.name, "remapJar"),
         RemapJar::class.java
     ) {
+        it.destinationDirectory.set(project.extension<ClocheExtension>().intermediateOutputsDirectory)
+
         it.input.set(project.tasks.named(sourceSet.jarTaskName, Jar::class.java).flatMap(Jar::getArchiveFile))
         it.sourceNamespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
         it.targetNamespace.set(target.modRemapNamespace)
