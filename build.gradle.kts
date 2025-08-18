@@ -26,6 +26,7 @@ repositories {
     maven(url = "https://maven.fabricmc.net/")
     maven(url = "https://maven.neoforged.net/")
     maven(url = "https://maven.msrandom.net/repository/cloche/")
+    maven(url = "https://raw.githubusercontent.com/SettingDust/minecraft-codev/refs/heads/maven-repo/")
 
     gradlePluginPortal()
 }
@@ -37,12 +38,12 @@ java {
 
 dependencies {
     implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.6.3")
-    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.6.3-dust")
+    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.6.3-dust")
     implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.5.32")
     implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.6.4")
     implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.5.32")
-    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.6.4")
+    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.6.4-dust")
     implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.5.32")
     implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.0")
 
@@ -69,6 +70,10 @@ tasks.withType<KotlinCompile> {
 publishing {
     repositories {
         mavenLocal()
+
+        maven("file://${rootProject.projectDir}/publish") {
+            name = "project"
+        }
 
         maven("https://maven.msrandom.net/repository/cloche/") {
             credentials {
