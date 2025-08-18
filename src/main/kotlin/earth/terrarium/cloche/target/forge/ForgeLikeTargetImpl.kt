@@ -374,14 +374,20 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
             it.destinationDirectory.set(project.extension<ClocheExtension>().finalOutputsDirectory)
 
-            it.input.set(modRemapNamespace.flatMap {
-                val jarTask = if (it.isEmpty()) {
+            val actualJarTask  = modRemapNamespace.flatMap {
+                if (it.isEmpty()) {
                     jar
                 } else {
                     remapJar
                 }
+            }
 
-                jarTask.flatMap(Jar::getArchiveFile)
+            it.input.set(actualJarTask.flatMap(Jar::getArchiveFile))
+
+            it.manifest.from(actualJarTask.flatMap(Jar::getArchiveFile).map {
+                project.zipTree(it).matching {
+                    it.include("META-INF/MANIFEST.MF")
+                }
             })
 
             it.fromResolutionResults(includeConfiguration)
@@ -403,14 +409,20 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
             it.destinationDirectory.set(project.extension<ClocheExtension>().finalOutputsDirectory)
 
-            it.input.set(modRemapNamespace.flatMap {
-                val jarTask = if (it.isEmpty()) {
+            val actualJarTask  = modRemapNamespace.flatMap {
+                if (it.isEmpty()) {
                     jar
                 } else {
                     remapJar
                 }
+            }
 
-                jarTask.flatMap(Jar::getArchiveFile)
+            it.input.set(actualJarTask.flatMap(Jar::getArchiveFile))
+
+            it.manifest.from(actualJarTask.flatMap(Jar::getArchiveFile).map {
+                project.zipTree(it).matching {
+                    it.include("META-INF/MANIFEST.MF")
+                }
             })
 
             it.fromResolutionResults(dataIncludeConfiguration)
