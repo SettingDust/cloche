@@ -3,8 +3,8 @@
 package earth.terrarium.cloche.target
 
 import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.PublicationSide
 import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
+import earth.terrarium.cloche.PublicationSide
 import earth.terrarium.cloche.api.MappingsBuilder
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.TargetAttributes
@@ -134,7 +134,6 @@ internal abstract class MinecraftTargetInternal(private val name: String) : Mine
     fun attributes(attributes: AttributeContainer) {
         attributes
             .attribute(TargetAttributes.MOD_LOADER, target.loaderName)
-            .attributeProvider(TargetAttributes.MINECRAFT_VERSION, target.minecraftVersion)
     }
 
     protected fun registerMappings() {
