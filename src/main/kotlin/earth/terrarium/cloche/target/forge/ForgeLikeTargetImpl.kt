@@ -387,7 +387,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             it.manifest.from(actualJarTask.flatMap(Jar::getArchiveFile).map {
                 project.zipTree(it).matching {
                     it.include("META-INF/MANIFEST.MF")
-                }
+                }.singleFile
             })
 
             it.fromResolutionResults(includeConfiguration)
@@ -422,7 +422,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             it.manifest.from(actualJarTask.flatMap(Jar::getArchiveFile).map {
                 project.zipTree(it).matching {
                     it.include("META-INF/MANIFEST.MF")
-                }
+                }.singleFile
             })
 
             it.fromResolutionResults(dataIncludeConfiguration)

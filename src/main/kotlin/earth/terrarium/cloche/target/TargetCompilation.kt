@@ -264,7 +264,7 @@ internal abstract class TargetCompilation @Inject constructor(val info: TargetCo
         it.manifest.from(jarTask.flatMap(Jar::getArchiveFile).map {
             project.zipTree(it).matching {
                 it.include("META-INF/MANIFEST.MF")
-            }
+            }.singleFile
         })
     }
 
