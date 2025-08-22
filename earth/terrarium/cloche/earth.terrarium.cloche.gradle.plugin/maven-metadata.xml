@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>earth.terrarium.cloche</groupId>
+  <artifactId>earth.terrarium.cloche.gradle.plugin</artifactId>
+  <versioning>
+    <latest>0.12.3-dust</latest>
+    <release>0.12.3-dust</release>
+    <versions>
+      <version>0.12.3-dust</version>
+    </versions>
+    <lastUpdated>20250822081512</lastUpdated>
+  </versioning>
+</metadata>
