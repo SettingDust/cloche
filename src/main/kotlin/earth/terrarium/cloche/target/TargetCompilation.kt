@@ -1,7 +1,6 @@
 package earth.terrarium.cloche.target
 
 import earth.terrarium.cloche.ClocheExtension
-import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
 import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.PublicationSide
