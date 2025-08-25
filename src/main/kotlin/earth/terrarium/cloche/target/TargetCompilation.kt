@@ -1,6 +1,7 @@
 package earth.terrarium.cloche.target
 
 import earth.terrarium.cloche.ClocheExtension
+import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
 import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.PublicationSide
@@ -333,6 +334,7 @@ internal abstract class TargetCompilation @Inject constructor(val info: TargetCo
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
             it.attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            it.attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             it.attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
             it.attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
@@ -341,6 +343,7 @@ internal abstract class TargetCompilation @Inject constructor(val info: TargetCo
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
             it.attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            it.attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             it.attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
             it.attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
