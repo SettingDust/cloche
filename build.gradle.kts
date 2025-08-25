@@ -71,6 +71,10 @@ publishing {
     repositories {
         mavenLocal()
 
+        maven("file://${rootProject.projectDir}/publish") {
+            name = "project"
+        }
+
         maven("https://maven.msrandom.net/repository/cloche/") {
             credentials {
                 val mavenUsername: String? by project
