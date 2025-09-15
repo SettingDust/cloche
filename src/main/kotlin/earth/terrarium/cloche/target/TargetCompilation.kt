@@ -167,7 +167,7 @@ private fun setupModTransformationPipeline(
             it.from.attribute(REMAPPED_ATTRIBUTE, false)
             it.to.attribute(REMAPPED_ATTRIBUTE, true)
 
-            it.from.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+            it.from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
             it.to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
             compilation.attributes(it.from)
