@@ -73,7 +73,7 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                 }
             }
 
-            it.doFirst { jar ->
+            it.doLast { jar ->
                 jar as Jar
 
                 val accessTransformerName = "accesstransformer.cfg"
