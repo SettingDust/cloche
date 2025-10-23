@@ -29,11 +29,11 @@
         {
           "name": "cloche-0.15.1-dust.jar",
           "url": "cloche-0.15.1-dust.jar",
-          "size": 559913,
-          "sha512": "ccb123f39b7993c4f0d00a283cfa1905f581cffbe2b4b27f97fa45a65468b0ad2082efd00660e49d3c71fba67b242506f37855f08e418a64b4d389d68989c6cf",
-          "sha256": "cffb37c5a50c2d86fb5fe6a3fb0d1308e31592b0c435dd1ce1214b8155678bed",
-          "sha1": "8035fdfee0a7b61038c368168f2f6725724666fe",
-          "md5": "ba9e0581c64bca144555f5c0a5ef7cfb"
+          "size": 559980,
+          "sha512": "3c14eeb0b9af725e945d29b4360fa990cf07988d4cb57634c534b45400259316e0642f4ccc3217e4ef5132bbbed052df3fea7bf3b848f8a543ff0a2c52b305e4",
+          "sha256": "417c515234bb7ab766e0666fc9a81239dfb79586769736d8f29e080b7fe5d59d",
+          "sha1": "25515f401cec81eb29256522cb2c10146ca4026b",
+          "md5": "d090644b95bd9b694cbec3b8d27d2870"
         }
       ]
     },
@@ -172,11 +172,11 @@
         {
           "name": "cloche-0.15.1-dust.jar",
           "url": "cloche-0.15.1-dust.jar",
-          "size": 559913,
-          "sha512": "ccb123f39b7993c4f0d00a283cfa1905f581cffbe2b4b27f97fa45a65468b0ad2082efd00660e49d3c71fba67b242506f37855f08e418a64b4d389d68989c6cf",
-          "sha256": "cffb37c5a50c2d86fb5fe6a3fb0d1308e31592b0c435dd1ce1214b8155678bed",
-          "sha1": "8035fdfee0a7b61038c368168f2f6725724666fe",
-          "md5": "ba9e0581c64bca144555f5c0a5ef7cfb"
+          "size": 559980,
+          "sha512": "3c14eeb0b9af725e945d29b4360fa990cf07988d4cb57634c534b45400259316e0642f4ccc3217e4ef5132bbbed052df3fea7bf3b848f8a543ff0a2c52b305e4",
+          "sha256": "417c515234bb7ab766e0666fc9a81239dfb79586769736d8f29e080b7fe5d59d",
+          "sha1": "25515f401cec81eb29256522cb2c10146ca4026b",
+          "md5": "d090644b95bd9b694cbec3b8d27d2870"
         }
       ]
     },
@@ -193,10 +193,10 @@
           "name": "cloche-0.15.1-dust-javadoc.jar",
           "url": "cloche-0.15.1-dust-javadoc.jar",
           "size": 261,
-          "sha512": "41d105ecf864eda9365526a41fdac4548636c2ffaf34e98dd1382497db62e5547222e16f265b8e5583400815726382b720dad33b4c2899c46e402cd574dc4125",
-          "sha256": "756825e5b43409c246d659310a3fb0e23fe9307de751e02d37ca596d561b7009",
-          "sha1": "a57fe37f55d1ca2fd40c757de7281a6f54457ab0",
-          "md5": "8e72e6121aad43288f0d5e52e5617b52"
+          "sha512": "90f41ad5bcca4294f00ad990d46001d38895fab2cb19daa8a4c649f92548923ded7a0c76c31a261e5383f51ad6a556bea37b87208465d2c371badbd270c996f1",
+          "sha256": "33add428389909112c19ced81f83516018d9841d5a7c4c9e335e68da2b493e9c",
+          "sha1": "254250981508112fe083160f4c11032ebad8a919",
+          "md5": "0ec35b8d59794bbe26def5e00f0661b1"
         }
       ]
     },
@@ -212,11 +212,11 @@
         {
           "name": "cloche-0.15.1-dust-sources.jar",
           "url": "cloche-0.15.1-dust-sources.jar",
-          "size": 79097,
-          "sha512": "c7a0ef5e3b70a9b8e117803b68263ec2e8662582e376a3305f4ce486081856413288b9a0a63c2dc9167c4bc3ed7c0540d5454f15b77400612b3924b341e7facd",
-          "sha256": "70d76bc9ab7280810a1fc4be0a711e95b3390fc625385294c36820d4c6338adb",
-          "sha1": "6010371298215b8636570961bff36f3f2faa97bc",
-          "md5": "bfc7ede701bf7e7bbfe804483e7efd7a"
+          "size": 79078,
+          "sha512": "df4f1df1ad9723b39efa7ec11f77deed4c69bc60c4119233dd6b5d8b26e49d5b9bbccab8ab2e348081c5541c4323ebbdf56ad366acd4ceb4072f5e888ac77521",
+          "sha256": "efa12f0fa7fac84d2a7fd9c885744c39af9db74e6333eccab12ecde87de5f1bd",
+          "sha1": "0522c8a9a147d98b76c75e927af88dcb5d6cf401",
+          "md5": "43ae96d4afcc0683e8a137fcb92c3095"
         }
       ]
     }
