@@ -26,6 +26,7 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.DependencyScopeConfiguration
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
@@ -37,6 +38,9 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.internal.extensions.core.serviceOf
+import org.gradle.kotlin.dsl.named
+import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.registerTransform
 import javax.inject.Inject
 
 private fun Project.getUnmappedModFiles(configurationName: String): FileCollection {
@@ -53,10 +57,10 @@ private fun Project.getUnmappedModFiles(configurationName: String): FileCollecti
         val filteredIdentifiers = componentIdentifiers.filter { it !is ProjectComponentIdentifier }
 
         classpath.incoming.artifactView {
-            it.componentFilter(filteredIdentifiers::contains)
+            componentFilter(filteredIdentifiers::contains)
 
-            it.attributes {
-                it.attribute(REMAPPED_ATTRIBUTE, false)
+            attributes {
+                attribute(REMAPPED_ATTRIBUTE, false)
             }
         }.files
     })
@@ -67,8 +71,12 @@ private fun Project.getUnmappedClasspath(configurationName: String): FileCollect
 
     return project.files(classpath.map { classpath ->
         classpath.incoming.artifactView {
-            it.attributes {
-                it.attribute(REMAPPED_ATTRIBUTE, false)
+            componentFilter {
+                it !is ProjectComponentIdentifier
+            }
+
+            attributes {
+                attribute(REMAPPED_ATTRIBUTE, false)
             }
         }.files
     })
@@ -87,43 +95,41 @@ internal fun registerCompilationTransformations(
 
     val project = target.project
 
-    val accessWidenTask = project.tasks.register(
+    val accessWidenTask = project.tasks.register<AccessWiden>(
         lowerCamelCaseGradleName(
             "accessWiden",
             target.featureName,
             collapsedName,
             "minecraft",
         ),
-        AccessWiden::class.java,
     ) {
-        it.group = "minecraft-transforms"
+        group = "minecraft-transforms"
 
-        it.inputFile.set(namedMinecraftFile)
-        it.namespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+        inputFile.set(namedMinecraftFile)
+        namespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
 
         with(project) {
             // TODO Export access wideners as a separate artifact
-            it.accessWideners.from(getRelevantSyncArtifacts(sourceSet.runtimeClasspathConfigurationName))
+            accessWideners.from(getRelevantSyncArtifacts(sourceSet.compileClasspathConfigurationName))
         }
 
-        it.outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
+        outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
             dir.file(file.asFile.name)
         })
     }
 
     val finalMinecraftFile = accessWidenTask.flatMap(AccessWiden::outputFile)
 
-    val decompile = project.tasks.register(
+    val decompile = project.tasks.register<Decompile>(
         lowerCamelCaseGradleName("decompile", target.featureName, collapsedName, "minecraft"),
-        Decompile::class.java,
     ) {
-        it.group = "sources"
+        group = "sources"
 
-        it.inputFile.set(finalMinecraftFile)
-        it.classpath.from(project.configurations.named(sourceSet.compileClasspathConfigurationName))
-        it.classpath.from(extraClasspathFiles)
+        inputFile.set(finalMinecraftFile)
+        classpath.from(project.configurations.named(sourceSet.compileClasspathConfigurationName))
+        classpath.from(extraClasspathFiles)
 
-        it.outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
+        outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
             dir.file("${file.asFile.nameWithoutExtension}-sources.${file.asFile.extension}")
         })
     }
@@ -169,39 +175,46 @@ private fun setupModTransformationPipeline(
                 continue
             }
 
-        project.dependencies.registerTransform(RemapAction::class.java) {
-            it.from.attribute(REMAPPED_ATTRIBUTE, false)
-            it.to.attribute(REMAPPED_ATTRIBUTE, true)
+        project.dependencies.registerTransform(RemapAction::class) {
+            from
+                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                .attribute(REMAPPED_ATTRIBUTE, false)
 
-            it.from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-            it.to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+            to
+                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                .attribute(REMAPPED_ATTRIBUTE, true)
 
-            compilation.attributes(it.from)
-            compilation.attributes(it.to)
+            from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
-            it.parameters {
+            compilation.attributes(from)
+            compilation.attributes(to)
+
+            parameters {
                 val compileClasspath =
                     project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
+
                 val runtimeClasspath =
                     project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+
                 val modCompileClasspath =
                     project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+
                 val modRuntimeClasspath =
                     project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                    it.mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
+                mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
 
-                    it.sourceNamespace.set(namespace)
+                sourceNamespace.set(namespace)
 
-                    it.extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
-                    it.extraClasspath.from(compileClasspath)
-                    it.extraClasspath.from(runtimeClasspath)
+                extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
+                extraClasspath.from(compileClasspath)
+                extraClasspath.from(runtimeClasspath)
 
-                    it.cacheDirectory.set(getGlobalCacheDirectory(project))
+                cacheDirectory.set(getGlobalCacheDirectory(project))
 
-                    it.modFiles.from(modCompileClasspath)
-                    it.modFiles.from(modRuntimeClasspath)
-                }
+                modFiles.from(modCompileClasspath)
+                modFiles.from(modRuntimeClasspath)
             }
         }
     }
@@ -245,7 +258,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val includeBucketConfiguration: NamedDomainObjectProvider<DependencyScopeConfiguration> =
         project.configurations.dependencyScope(lowerCamelCaseGradleName(target.featureName, featureName, "include")) {
-            it.addCollectedDependencies(dependencyHandler.include)
+            addCollectedDependencies(dependencyHandler.include)
         }
 
     private val includeResolvableConfiguration =
@@ -253,38 +266,36 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             lowerCamelCaseGradleName(
                 target.featureName,
                 featureName,
-                "includeFiles"
+                "includeFiles",
             )
-        ) { configuration ->
-            configuration.extendsFrom(includeBucketConfiguration.get())
+        ) {
+            extendsFrom(includeBucketConfiguration.get())
 
-            attributes(configuration.attributes)
+            this@TargetCompilation.attributes(attributes)
 
-            configuration.attributes
+            attributes
                 .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, true)
                 .attributeProvider(CompilationAttributes.SIDE, info.side)
                 .attribute(CompilationAttributes.DATA, info.data)
 
-            configuration.isTransitive = false
+            isTransitive = false
         }
 
     val remapJarTask: TaskProvider<RemapJar>? = if (!isTest) {
-        project.tasks.register(
+        project.tasks.register<RemapJar>(
             lowerCamelCaseGradleName(sourceSet.takeUnless(SourceSet::isMain)?.name, "remapJar"),
-            RemapJar::class.java
         ) {
-            val jarFile = project.tasks.named(sourceSet.jarTaskName, Jar::class.java)
-                .flatMap(Jar::getArchiveFile)
+            val jarFile = project.tasks.named<Jar>(sourceSet.jarTaskName).flatMap(Jar::getArchiveFile)
 
-            it.destinationDirectory.set(project.cloche.intermediateOutputsDirectory)
-            it.input.set(jarFile)
-            it.sourceNamespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
-            it.targetNamespace.set(target.modRemapNamespace)
-            it.classpath.from(sourceSet.compileClasspath)
+            destinationDirectory.set(project.cloche.intermediateOutputsDirectory)
+            input.set(jarFile)
+            sourceNamespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            targetNamespace.set(target.modRemapNamespace)
+            classpath.from(sourceSet.compileClasspath)
 
-            it.mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
+            mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
 
-            it.manifest.fromJars(project.serviceOf(), jarFile)
+            manifest.fromJars(project.serviceOf(), jarFile)
         }
     } else {
         null
@@ -295,9 +306,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             lowerCamelCaseGradleName(sourceSet.takeUnless(SourceSet::isMain)?.name, "includeJar"),
             info.includeJarType,
         ) {
-            it.destinationDirectory.set(project.cloche.finalOutputsDirectory)
+            destinationDirectory.set(project.cloche.finalOutputsDirectory)
 
-            val jar = project.tasks.named(sourceSet.jarTaskName, Jar::class.java)
+            val jar = project.tasks.named<Jar>(sourceSet.jarTaskName)
             val remapped = target.modRemapNamespace.map(String::isNotEmpty)
 
             val jarFile = remapped.flatMap {
@@ -310,10 +321,10 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 jarTask.flatMap(Jar::getArchiveFile)
             }
 
-            it.input.set(jarFile)
-            it.manifest.fromJars(project.serviceOf(), jarFile)
+            input.set(jarFile)
+            manifest.fromJars(project.serviceOf(), jarFile)
 
-            it.fromResolutionResults(includeResolvableConfiguration)
+            fromResolutionResults(includeResolvableConfiguration)
         }
     } else {
         null
@@ -323,25 +334,25 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         setupModTransformationPipeline(project, target, this)
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-            it.attributes.attribute(REMAPPED_ATTRIBUTE, true)
-            it.attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-            it.attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
-            it.attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-            it.extendsFrom(target.mappingsBuildDependenciesHolder)
+            extendsFrom(target.mappingsBuildDependenciesHolder)
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-            it.attributes.attribute(REMAPPED_ATTRIBUTE, true)
-            it.attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-            it.attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
-            it.attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-            it.extendsFrom(target.mappingsBuildDependenciesHolder)
+            extendsFrom(target.mappingsBuildDependenciesHolder)
         }
 
         setupFiles.first.configure {
-            it.accessWideners.from(accessWideners)
+            accessWideners.from(this@TargetCompilation.accessWideners)
         }
 
         // Use detached configuration for idea compat
