@@ -1,27 +1,20 @@
 package earth.terrarium.cloche.target.forge.neo
 
 import earth.terrarium.cloche.api.target.NeoforgeTarget
-import earth.terrarium.cloche.modId
 import earth.terrarium.cloche.target.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
-import earth.terrarium.cloche.tasks.data.FabricMod
 import earth.terrarium.cloche.tasks.data.NeoForgeMods
 import earth.terrarium.cloche.tasks.data.decodeFromStream
 import earth.terrarium.cloche.tasks.data.encodeToStream
 import earth.terrarium.cloche.tasks.data.toml
-import kotlinx.serialization.json.decodeFromStream
-import kotlinx.serialization.json.encodeToStream
-import net.msrandom.minecraftcodev.core.MinecraftCodevPlugin.Companion.json
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.zipFileSystem
-import net.msrandom.minecraftcodev.fabric.MinecraftCodevFabricPlugin
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.named
-import java.util.jar.JarFile
 import javax.inject.Inject
 import kotlin.io.path.exists
 import kotlin.io.path.inputStream
@@ -73,7 +66,7 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
         resolvableAttributes(::addAttributes)
 
         data.onConfigured {
-            it.resolvableAttributes(::addAttributes)
+            resolvableAttributes(::addAttributes)
         }
     }
 

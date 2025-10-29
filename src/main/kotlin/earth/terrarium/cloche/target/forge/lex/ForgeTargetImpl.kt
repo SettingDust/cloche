@@ -12,7 +12,6 @@ import net.msrandom.minecraftcodev.forge.task.GenerateMcpToSrg
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Internal
-import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
@@ -75,9 +74,8 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                 }
             }
 
-            it.doLast { jar ->
-                jar as Jar
-
+            doLast {
+                this as Jar
                 val accessTransformerName = "accesstransformer.cfg"
 
                 zipFileSystem(archiveFile.get().asFile.toPath()).use {
@@ -85,7 +83,7 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                         manifest.attributes["FMLAT"] = accessTransformerName
                     }
                 }
-            }*/
+            }
         }
     }
 }

@@ -6,11 +6,10 @@ import earth.terrarium.cloche.PublicationSide
 import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.cloche
-import earth.terrarium.cloche.modId
 import earth.terrarium.cloche.util.fromJars
 import earth.terrarium.cloche.util.optionalDir
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import net.msrandom.minecraftcodev.accesswidener.AccessWiden
 import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
@@ -165,56 +164,57 @@ private fun setupModTransformationPipeline(
                 remapNamespace?.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
 
             if (namespace.isEmpty()) {
-                project.dependencies.registerTransform(NoopAction::class.java) {
-                    it.from.attribute(REMAPPED_ATTRIBUTE, false)
-                    it.to.attribute(REMAPPED_ATTRIBUTE, true)
+                project.dependencies.registerTransform(NoopAction::class) {
+                    from.attribute(REMAPPED_ATTRIBUTE, false)
+                    to.attribute(REMAPPED_ATTRIBUTE, true)
 
-                    compilation.attributes(it.from)
-                    compilation.attributes(it.to)
+                    compilation.attributes(from)
+                    compilation.attributes(to)
                 }
                 continue
             }
 
-        project.dependencies.registerTransform(RemapAction::class) {
-            from
-                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                .attribute(REMAPPED_ATTRIBUTE, false)
+            project.dependencies.registerTransform(RemapAction::class) {
+                from
+                    .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                    .attribute(REMAPPED_ATTRIBUTE, false)
 
-            to
-                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                .attribute(REMAPPED_ATTRIBUTE, true)
+                to
+                    .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                    .attribute(REMAPPED_ATTRIBUTE, true)
 
-            from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-            to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
-            compilation.attributes(from)
-            compilation.attributes(to)
+                compilation.attributes(from)
+                compilation.attributes(to)
 
-            parameters {
-                val compileClasspath =
-                    project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
+                parameters {
+                    val compileClasspath =
+                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
 
-                val runtimeClasspath =
-                    project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+                    val runtimeClasspath =
+                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                val modCompileClasspath =
-                    project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                    val modCompileClasspath =
+                        project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
 
-                val modRuntimeClasspath =
-                    project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                    val modRuntimeClasspath =
+                        project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
+                    mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
 
-                sourceNamespace.set(namespace)
+                    sourceNamespace.set(namespace)
 
-                extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
-                extraClasspath.from(compileClasspath)
-                extraClasspath.from(runtimeClasspath)
+                    extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
+                    extraClasspath.from(compileClasspath)
+                    extraClasspath.from(runtimeClasspath)
 
-                cacheDirectory.set(getGlobalCacheDirectory(project))
+                    cacheDirectory.set(getGlobalCacheDirectory(project))
 
-                modFiles.from(modCompileClasspath)
-                modFiles.from(modRuntimeClasspath)
+                    modFiles.from(modCompileClasspath)
+                    modFiles.from(modRuntimeClasspath)
+                }
             }
         }
     }
@@ -234,7 +234,8 @@ internal data class TargetCompilationInfo<T : MinecraftTargetInternal>(
 )
 
 @Suppress("UnstableApiUsage")
-internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject constructor(val info: TargetCompilationInfo<T>) : CompilationInternal() {
+internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject constructor(val info: TargetCompilationInfo<T>) :
+    CompilationInternal() {
     override val target get() = info.target
 
     override val isTest get() = info.test
