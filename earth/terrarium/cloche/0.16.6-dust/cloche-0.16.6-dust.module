@@ -29,11 +29,11 @@
         {
           "name": "cloche-0.16.6-dust.jar",
           "url": "cloche-0.16.6-dust.jar",
-          "size": 1035362,
-          "sha512": "ca86602694520d0f8848caf7047a7b0127a43d3fc010d74bada13ea3cb6bbfc557f9610e60ff4fc754f491d22ce097dc47ae443228fb599a2a44bf6128b5cb72",
-          "sha256": "d7f52408709c64a36486a4c3efde1b036df0e04e77aeaf6bef7cb778eb60e467",
-          "sha1": "e6306acafc8a1273ecb011f0219f831241a99f67",
-          "md5": "73a396bd697419f2bcca6efdc48cac59"
+          "size": 1035745,
+          "sha512": "b18e60053d5ca9130221237ca0201d7614af6a8d30e968357e277138cc8ba9834439ec979cf80c55d808184d4be1c5a70d1b6376da3682d02c2087d22b758da4",
+          "sha256": "db816f131c0d12fba602467b47a8c162b445015477b6a2eafd279fbc45333a0c",
+          "sha1": "8a3d1f7719092f82e3bfade7016043d2eb3cf9e9",
+          "md5": "22f9b4cd0a7a5d2a502c0ced1d48c720"
         }
       ]
     },
@@ -172,11 +172,11 @@
         {
           "name": "cloche-0.16.6-dust.jar",
           "url": "cloche-0.16.6-dust.jar",
-          "size": 1035362,
-          "sha512": "ca86602694520d0f8848caf7047a7b0127a43d3fc010d74bada13ea3cb6bbfc557f9610e60ff4fc754f491d22ce097dc47ae443228fb599a2a44bf6128b5cb72",
-          "sha256": "d7f52408709c64a36486a4c3efde1b036df0e04e77aeaf6bef7cb778eb60e467",
-          "sha1": "e6306acafc8a1273ecb011f0219f831241a99f67",
-          "md5": "73a396bd697419f2bcca6efdc48cac59"
+          "size": 1035745,
+          "sha512": "b18e60053d5ca9130221237ca0201d7614af6a8d30e968357e277138cc8ba9834439ec979cf80c55d808184d4be1c5a70d1b6376da3682d02c2087d22b758da4",
+          "sha256": "db816f131c0d12fba602467b47a8c162b445015477b6a2eafd279fbc45333a0c",
+          "sha1": "8a3d1f7719092f82e3bfade7016043d2eb3cf9e9",
+          "md5": "22f9b4cd0a7a5d2a502c0ced1d48c720"
         }
       ]
     },
@@ -212,11 +212,11 @@
         {
           "name": "cloche-0.16.6-dust-sources.jar",
           "url": "cloche-0.16.6-dust-sources.jar",
-          "size": 79695,
-          "sha512": "faf2a9c9afbe70dfd47105f2ac8eb284a35e5fbef88cf5565ee192998f6d6e27452735f7ef2685247d9a804eb27227bcf4d1231c79e3e9fb5c27211fff0cae2c",
-          "sha256": "bde327c87f07978af3c88f16621c0f1b7d5a9bc1f6aba3f9e8fc1da7e74615d4",
-          "sha1": "b55c3ea8438302fc0eda2ab12535ddaeda75176c",
-          "md5": "7ede1640b8c4708df6f85e830b22609e"
+          "size": 79753,
+          "sha512": "19e608cf95ec69c71bd3983563239c8038479f8aaf87f97ee96d36817c5c26365604e3e68ff41a657353fbd18a8d3fc2539bc790f309a8655ffff5f8a195d1e0",
+          "sha256": "acf9c0b8ef97c768d204b3be5839357483d19251b7e6c3b8d884a02f68da755f",
+          "sha1": "181d701f06f04786b4f261ac4221d11a71e67dbe",
+          "md5": "3c5da6453cc8140acefab4060120bb41"
         }
       ]
     }
