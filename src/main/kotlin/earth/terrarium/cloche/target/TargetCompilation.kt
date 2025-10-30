@@ -179,16 +179,14 @@ private fun setupModTransformationPipeline(
                 from
                     .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
                     .attribute(REMAPPED_ATTRIBUTE, false)
+                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                    .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
                 to
                     .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
                     .attribute(REMAPPED_ATTRIBUTE, true)
-
-                from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
-
-                from.attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
-                to.attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
+                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                    .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
                 compilation.attributes(from)
                 compilation.attributes(to)
