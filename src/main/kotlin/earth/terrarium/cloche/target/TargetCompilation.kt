@@ -160,17 +160,30 @@ private fun setupModTransformationPipeline(
     // afterEvaluate needed as the registration of a transform is dependent on a lazy provider
     //  this can potentially be changed to a no-op transform, but that's far slower
     project.afterEvaluate {
+        var registeredNoop = false
         for (remapNamespace in target.mappings.remapNamespaces.get()) {
             val namespace =
                 remapNamespace?.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
 
             if (namespace.isEmpty()) {
-                project.dependencies.registerTransform(NoopAction::class) {
-                    from.attribute(REMAPPED_ATTRIBUTE, false)
-                    to.attribute(REMAPPED_ATTRIBUTE, true)
+                if (!registeredNoop) {
+                    project.dependencies.registerTransform(NoopAction::class) {
+                        from
+                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                            .attribute(REMAPPED_ATTRIBUTE, false)
+                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                            .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
-                    compilation.attributes(from)
-                    compilation.attributes(to)
+                        to
+                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                            .attribute(REMAPPED_ATTRIBUTE, true)
+                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                            .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
+
+                        compilation.attributes(from)
+                        compilation.attributes(to)
+                    }
+                    registeredNoop = true
                 }
                 continue
             }
@@ -254,7 +267,8 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val metadataDirectory: Provider<Directory>
         @Internal
-        get() = project.layout.buildDirectory.dir("generated").map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
+        get() = project.layout.buildDirectory.dir("generated")
+            .map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
 
     val finalMinecraftFile: Provider<RegularFile> = setupFiles.first.flatMap(AccessWiden::outputFile)
     val sources = setupFiles.second
