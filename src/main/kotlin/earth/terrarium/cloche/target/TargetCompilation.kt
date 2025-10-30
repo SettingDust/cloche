@@ -1,5 +1,6 @@
 package earth.terrarium.cloche.target
 
+import earth.terrarium.cloche.CLOCHE_TARGET_ATTRIBUTE
 import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
 import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.PublicationSide
@@ -186,6 +187,9 @@ private fun setupModTransformationPipeline(
                 from.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
                 to.attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
+                from.attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
+                to.attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
+
                 compilation.attributes(from)
                 compilation.attributes(to)
 
@@ -335,19 +339,23 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         setupModTransformationPipeline(project, target, this)
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-            attributes.attribute(REMAPPED_ATTRIBUTE, true)
-            attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-            attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes
+                .attribute(REMAPPED_ATTRIBUTE, true)
+                .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+                .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
+                .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
             extendsFrom(target.mappingsBuildDependenciesHolder)
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-            attributes.attribute(REMAPPED_ATTRIBUTE, true)
-            attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-            attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes
+                .attribute(REMAPPED_ATTRIBUTE, true)
+                .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+                .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
+                .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
             extendsFrom(target.mappingsBuildDependenciesHolder)
         }
@@ -380,6 +388,8 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
     override fun resolvableAttributes(attributes: AttributeContainer) {
         super.resolvableAttributes(attributes)
 
-        attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+        attributes
+            .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
     }
 }
