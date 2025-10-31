@@ -356,7 +356,6 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
                 .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
                 .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
             extendsFrom(target.mappingsBuildDependenciesHolder)
         }
@@ -367,7 +366,6 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
                 .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, info.includeState)
                 .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                .attribute(CLOCHE_TARGET_ATTRIBUTE, target.name)
 
             extendsFrom(target.mappingsBuildDependenciesHolder)
         }
