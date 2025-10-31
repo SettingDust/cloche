@@ -95,6 +95,10 @@ fun applyToProject(target: Project) {
             compatibilityRules.add(DataCompatibilityRule::class)
             disambiguationRules.add(DataDisambiguationRule::class)
         }
+
+        attribute(ClocheTargetAttribute.ATTRIBUTE) {
+            compatibilityRules.add(ClocheTargetAttribute.CompatibilityRule::class)
+        }
     }
 
     target.dependencies.artifactTypes {
@@ -104,7 +108,7 @@ fun applyToProject(target: Project) {
                 .attribute(NO_NAME_MAPPING_ATTRIBUTE, false)
                 .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, IncludeTransformationStateAttribute.None)
                 .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                .attribute(CLOCHE_TARGET_ATTRIBUTE, "none")
+                .attribute(ClocheTargetAttribute.ATTRIBUTE, ClocheTargetAttribute.INITIAL)
         }
     }
 
