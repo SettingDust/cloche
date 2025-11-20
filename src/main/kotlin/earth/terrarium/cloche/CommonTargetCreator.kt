@@ -5,10 +5,23 @@ package earth.terrarium.cloche
 import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
 import earth.terrarium.cloche.api.attributes.CommonTargetAttributes
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
+import earth.terrarium.cloche.api.attributes.MinecraftModLoader
+import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.TargetAttributes
 import earth.terrarium.cloche.api.target.targetName
-import earth.terrarium.cloche.target.*
+import earth.terrarium.cloche.target.CommonCompilation
+import earth.terrarium.cloche.target.CommonTargetInternal
+import earth.terrarium.cloche.target.CommonTopLevelCompilation
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.TargetCompilation
+import earth.terrarium.cloche.target.addCollectedDependencies
+import earth.terrarium.cloche.target.configureSourceSet
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
+import earth.terrarium.cloche.target.getNonProjectArtifacts
+import earth.terrarium.cloche.target.getRelevantSyncArtifacts
+import earth.terrarium.cloche.target.localImplementationConfigurationName
+import earth.terrarium.cloche.target.localRuntimeConfigurationName
+import earth.terrarium.cloche.target.modConfigurationName
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.stubs.GenerateStubApi
 import org.gradle.api.Project
@@ -18,7 +31,6 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.plugins.JavaPlugin
-import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.compile.JavaCompile
@@ -47,12 +59,12 @@ private fun convertClasspath(
                 }
             }
 
-    val artifacts = getNonProjectArtifacts(configurations.named(compilation.sourceSet.compileClasspathConfigurationName)).flatMap {
-        it.artifacts.resolvedArtifacts.map { artifacts ->
+    val artifacts = getNonProjectArtifacts(configurations.named(compilation.sourceSet.compileClasspathConfigurationName)).flatMap { view ->
+        view.artifacts.resolvedArtifacts.map { artifacts ->
             artifacts.map {
                 val artifact = objects.newInstance<GenerateStubApi.ResolvedArtifact>()
 
-                artifact.id.set(it.id.componentIdentifier)
+                artifact.setComponent(it.id.componentIdentifier)
                 artifact.file.set(it.file)
 
                 artifact
@@ -118,7 +130,7 @@ internal fun createCommonTarget(
 
     fun addCompilation(
         compilation: CommonCompilation,
-        variant: PublicationSide,
+        variant: ModDistribution,
         data: Boolean,
         targetCompilations: Provider<List<TargetCompilation<*>>>,
     ) {
@@ -129,7 +141,7 @@ internal fun createCommonTarget(
         createCompilationVariants(
             compilation,
             sourceSet,
-            commonTarget.targetName == COMMON || commonTarget.publish
+            commonTarget.targetName == MinecraftModLoader.common.name || commonTarget.publish
         )
 
         configureSourceSet(sourceSet, commonTarget, compilation)
@@ -238,7 +250,7 @@ internal fun createCommonTarget(
         )
 
         compilation.attributes {
-            attribute(CompilationAttributes.SIDE, variant)
+            attribute(CompilationAttributes.DISTRIBUTION, variant)
             attribute(CompilationAttributes.DATA, data)
 
             // afterEvaluate needed as the attributes existing(not just their values) depend on configurable info
@@ -254,7 +266,7 @@ internal fun createCommonTarget(
                     attribute(TargetAttributes.MINECRAFT_VERSION, minecraftVersion)
                 }
 
-                if (!onlyCommonOfType.get() && commonTarget.targetName != COMMON && !commonTarget.publish) {
+                if (!onlyCommonOfType.get() && commonTarget.targetName != MinecraftModLoader.common.name && !commonTarget.publish) {
                     attribute(CommonTargetAttributes.NAME, commonTarget.targetName!!)
                 }
             }
@@ -309,7 +321,7 @@ internal fun createCommonTarget(
         compilation: CommonTopLevelCompilation,
         dataGetter: (MinecraftTargetInternal) -> TargetCompilation<*>,
         testGetter: (MinecraftTargetInternal) -> TargetCompilation<*>,
-        variant: PublicationSide,
+        variant: ModDistribution,
         targetCompilations: Provider<List<TargetCompilation<*>>>,
     ) {
         addCompilation(compilation, variant, false, targetCompilations)
@@ -363,7 +375,7 @@ internal fun createCommonTarget(
         commonTarget.main,
         { it.data.internalValue ?: it.main },
         { it.test.internalValue ?: it.main },
-        PublicationSide.Common,
+        ModDistribution.common,
         commonTarget.dependents.map {
             it.map { (it as MinecraftTargetInternal).main }
         },
@@ -386,7 +398,7 @@ internal fun createCommonTarget(
                     ?: it.test.internalValue
                     ?: it.main
             },
-            PublicationSide.Client,
+            ModDistribution.client,
             commonTarget.dependents.map {
                 it.map {
                     (it as? FabricTargetImpl)?.client?.internalValue as? TargetCompilation<*>

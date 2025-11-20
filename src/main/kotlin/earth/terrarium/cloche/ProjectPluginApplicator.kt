@@ -35,8 +35,8 @@ import org.gradle.kotlin.dsl.create
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withModule
-import org.gradle.plugins.ide.idea.IdeaPlugin
 import org.gradle.kotlin.dsl.withType
+import org.gradle.plugins.ide.idea.IdeaPlugin
 
 private fun propertyName(name: String) = "earth.terrarium.cloche.$name"
 
@@ -88,7 +88,7 @@ fun applyToProject(target: Project) {
     ClocheRepositoriesExtension.register(target.repositories)
 
     target.dependencies.attributesSchema {
-        attribute(CompilationAttributes.SIDE) {
+        attribute(CompilationAttributes.DISTRIBUTION) {
             compatibilityRules.add(SideCompatibilityRule::class)
             disambiguationRules.add(SideDisambiguationRule::class)
         }

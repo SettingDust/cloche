@@ -2,8 +2,16 @@ package earth.terrarium.cloche
 
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
-import earth.terrarium.cloche.target.*
+import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.TargetCompilation
+import earth.terrarium.cloche.target.addCollectedDependencies
+import earth.terrarium.cloche.target.configureSourceSet
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
+import earth.terrarium.cloche.target.localImplementationConfigurationName
+import earth.terrarium.cloche.target.localRuntimeConfigurationName
+import earth.terrarium.cloche.target.modConfigurationName
+import earth.terrarium.cloche.target.sourceSetName
 import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
@@ -31,11 +39,11 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.kotlin.dsl.named
+import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import org.gradle.kotlin.dsl.named
-import org.gradle.kotlin.dsl.register
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
@@ -379,7 +387,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         val variant = outgoing.variants.create("includeTransformed") {
             attributes
                 .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, true)
-                .attribute(CompilationAttributes.SIDE, PublicationSide.Joined)
+                .attribute(CompilationAttributes.DISTRIBUTION, ModDistribution.client)
 
             artifact(target.finalJar)
         }
