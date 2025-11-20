@@ -28,6 +28,7 @@ repositories {
     maven(url = "https://maven.fabricmc.net/")
     maven(url = "https://maven.neoforged.net/")
     maven(url = "https://maven.msrandom.net/repository/cloche/")
+    maven("https://raw.githubusercontent.com/SettingDust/jvm-multiplatform/refs/heads/maven-repo/")
 
     gradlePluginPortal()
 }
