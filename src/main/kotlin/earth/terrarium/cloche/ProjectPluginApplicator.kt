@@ -121,6 +121,7 @@ fun applyToProject(target: Project) {
         attribute(NO_NAME_MAPPING_ATTRIBUTE)
         attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE)
         attribute(IncludeTransformationStateAttribute.ATTRIBUTE)
+
     }
 
     target.dependencies.artifactTypes {
