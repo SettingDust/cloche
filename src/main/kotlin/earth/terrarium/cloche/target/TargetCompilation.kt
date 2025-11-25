@@ -370,8 +370,6 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
     init {
         setupModTransformationPipeline(project, _info.target, this)
 
-        val remapped = _info.target.modRemapNamespace.map(String::isNotEmpty)
-
         val minecraftBuildDependenciesHolder: Configuration =
             project.configurations.detachedConfiguration(
                 project.dependencies.create(
@@ -383,6 +381,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             attributes.attribute(REMAPPED_ATTRIBUTE, true)
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
             extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)
         }
@@ -391,6 +390,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             attributes.attribute(REMAPPED_ATTRIBUTE, true)
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
             extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)
         }
