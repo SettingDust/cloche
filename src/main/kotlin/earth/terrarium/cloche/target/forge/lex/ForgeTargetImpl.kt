@@ -7,6 +7,7 @@ import earth.terrarium.cloche.api.target.compilation.Compilation
 import earth.terrarium.cloche.target.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
+import net.msrandom.minecraftcodev.core.utils.zipFileSystem
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
 import net.msrandom.minecraftcodev.forge.RemoveNameMappingService
 import net.msrandom.minecraftcodev.forge.task.GenerateMcpToSrg
@@ -21,6 +22,7 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
 import java.io.File
 import javax.inject.Inject
+import kotlin.io.path.exists
 
 internal abstract class ForgeTargetImpl @Inject constructor(name: String) : ForgeLikeTargetImpl(name), ForgeTarget {
     override val runs = objectFactory.newInstance<LexForgeRunConfigurations>(this)
