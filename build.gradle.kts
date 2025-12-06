@@ -39,6 +39,12 @@ java {
     withSourcesJar()
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("net.msrandom:minecraft-codev-includes:0.6.3-dust")
+    }
+}
+
 dependencies {
     implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.5")
     implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.6.9")
