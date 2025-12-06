@@ -29,6 +29,7 @@ repositories {
     maven(url = "https://maven.neoforged.net/")
     maven(url = "https://maven.msrandom.net/repository/cloche/")
     maven("https://raw.githubusercontent.com/SettingDust/jvm-multiplatform/refs/heads/maven-repo/")
+    maven("https://raw.githubusercontent.com/SettingDust/minecraft-codev/refs/heads/maven-repo/")
 
     gradlePluginPortal()
 }
@@ -47,7 +48,7 @@ dependencies {
     implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.0")
     implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.6.8")
     implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.3-dust")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
     implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.5")
