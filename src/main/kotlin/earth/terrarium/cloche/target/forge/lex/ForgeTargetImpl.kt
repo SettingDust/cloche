@@ -15,6 +15,7 @@ import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
@@ -83,6 +84,8 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
         "$minecraftVersion-$loaderVersion"
 
     override fun addJarInjects(compilation: CompilationInternal) {
+        val hasAccessTransformers = providerFactory.provider { !compilation.accessWideners.isEmpty }
+
         project.tasks.named<Jar>(compilation.sourceSet.jarTaskName) {
             manifest {
                 attributes["MixinConfigs"] = object {
@@ -90,15 +93,12 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                         return compilation.mixins.joinToString(",", transform = File::getName)
                     }
                 }
-            }
 
-            doLast {
-                this as Jar
-                val accessTransformerName = "accesstransformer.cfg"
-
-                zipFileSystem(archiveFile.get().asFile.toPath()).use {
-                    if (it.getPath("META-INF", accessTransformerName).exists()) {
-                        manifest.attributes["FMLAT"] = accessTransformerName
+                attributes["FMLAT"] = hasAccessTransformers.map {
+                    if (it) {
+                        "accesstransformer.cfg"
+                    } else {
+                        null
                     }
                 }
             }
