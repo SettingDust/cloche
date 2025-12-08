@@ -3,8 +3,8 @@
   <groupId>earth.terrarium.cloche</groupId>
   <artifactId>earth.terrarium.cloche.gradle.plugin</artifactId>
   <versioning>
-    <latest>0.16.25-dust.1</latest>
-    <release>0.16.25-dust.1</release>
+    <latest>0.16.25-dust.2</latest>
+    <release>0.16.25-dust.2</release>
     <versions>
       <version>0.12.3-dust</version>
       <version>0.13.2</version>
@@ -27,7 +27,8 @@
       <version>0.16.25-dust</version>
       <version>0.16.25-dust.0</version>
       <version>0.16.25-dust.1</version>
+      <version>0.16.25-dust.2</version>
     </versions>
-    <lastUpdated>20251208074651</lastUpdated>
+    <lastUpdated>20251208082517</lastUpdated>
   </versioning>
 </metadata>
