@@ -440,12 +440,9 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     }
 
                     val newMetadata = buildJsonObject {
+                        put("accessWidener", JsonPrimitive(accessWidenerFileName))
                         for ((key, value) in metadata) {
-                            if (key != "accessWidener") {
-                                put(key, value)
-                            } else {
-                                put(key, JsonPrimitive(accessWidenerFileName))
-                            }
+                            put(key, value)
                         }
                     }
 
