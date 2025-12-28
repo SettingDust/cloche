@@ -3,8 +3,11 @@ package earth.terrarium.cloche
 import earth.terrarium.cloche.target.CompilationInternal
 import net.msrandom.minecraftcodev.core.utils.extension
 import org.gradle.api.Project
+import org.gradle.api.attributes.java.TargetJvmEnvironment
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.SourceSet
+import org.gradle.kotlin.dsl.named
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
 internal fun Project.createCompilationVariants(
     compilation: CompilationInternal,
@@ -60,6 +63,14 @@ internal fun Project.createCompilationVariants(
 
         project.configurations.named { it in configurationNames }.configureEach {
             outgoing.capability(compilationCapability)
+
+            attributes {
+                attribute(TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE, objects.named(TargetJvmEnvironment.STANDARD_JVM))
+
+                plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
+                    attribute(KotlinPlatformType.attribute, KotlinPlatformType.jvm)
+                }
+            }
         }
     }
 }

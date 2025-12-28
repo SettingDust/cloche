@@ -208,7 +208,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             start.set(version)
         }
 
-    private fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
+    protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
         minecraftVersion.flatMap { minecraftVersion ->
             loaderVersion.map { forgeVersion ->
                 dependencyFactory.create(group, artifact, null).apply {
