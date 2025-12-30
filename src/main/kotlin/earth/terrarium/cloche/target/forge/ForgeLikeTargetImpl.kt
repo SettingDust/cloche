@@ -91,6 +91,14 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
     }
 
+    private val clientExtra = project.files(minecraftVersion.map {
+        if (ClochePlugin.isUnobfuscated(it)) {
+            emptyList()
+        } else {
+            listOf(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra))
+        }
+    })
+
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
@@ -117,14 +125,14 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         data.dependencies {
-            runtimeOnly.add(project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)))
+            runtimeOnly.add(clientExtra)
         }
 
         data
     }
 
     final override val test: LazyConfigurableInternal<ForgeCompilationImpl> = project.lazyConfigurable {
-        val data = objectFactory.newInstance<ForgeCompilationImpl>(
+        val test = objectFactory.newInstance<ForgeCompilationImpl>(
             ForgeCompilationInfo(
                 SourceSet.TEST_SOURCE_SET_NAME,
                 this,
@@ -136,11 +144,11 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ),
         )
 
-        data.dependencies {
-            runtimeOnly.add(project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)))
+        test.dependencies {
+            runtimeOnly.add(clientExtra)
         }
 
-        data
+        test
     }
 
     protected abstract val providerFactory: ProviderFactory
@@ -176,7 +184,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         project.dependencies.add(
             sourceSet.runtimeOnlyConfigurationName,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)),
+            clientExtra,
         )
 
         val userdev = forgeDependency {
