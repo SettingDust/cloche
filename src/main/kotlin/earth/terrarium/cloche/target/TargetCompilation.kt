@@ -190,8 +190,8 @@ private fun setupModTransformationPipeline(
                             .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
                             .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                        compilation.attributes(from)
-                        compilation.attributes(to)
+                        compilation.baseAttributes(from)
+                        compilation.baseAttributes(to)
                     }
                     registeredNoop = true
                 }
