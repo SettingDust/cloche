@@ -77,7 +77,7 @@ jobs:
         run: |
           mkdir -p /tmp/m2-snapshot
           if [ -d "$HOME/.m2/repository/$GROUP_PATH" ]; then
-            find "$HOME/.m2/repository/$GROUP_PATH" -type f > /tmp/m2-snapshot/before.txt
+            find "$HOME/.m2/repository/$GROUP_PATH" -type f | sort > /tmp/m2-snapshot/before.txt
           else
             touch /tmp/m2-snapshot/before.txt
           fi
@@ -102,7 +102,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           
           # Find all new files added by the build
-          find "$HOME/.m2/repository/$GROUP_PATH" -type f > /tmp/m2-snapshot/after.txt
+          find "$HOME/.m2/repository/$GROUP_PATH" -type f | sort > /tmp/m2-snapshot/after.txt
           
           # Get the list of new files
           comm -13 /tmp/m2-snapshot/before.txt /tmp/m2-snapshot/after.txt > /tmp/m2-snapshot/new-files.txt
