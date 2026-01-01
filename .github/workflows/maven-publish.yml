@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GROUP_PATH: "earth/terrarium"
-      ARTIFACT_ID: "cloche"
 
     steps:
       - uses: actions/checkout@v6
@@ -73,6 +72,16 @@ jobs:
           
           echo "Version verification passed: $TAG_VERSION"
 
+      - name: Snapshot .m2 before build
+        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
+        run: |
+          mkdir -p /tmp/m2-snapshot
+          if [ -d "$HOME/.m2/repository/$GROUP_PATH" ]; then
+            find "$HOME/.m2/repository/$GROUP_PATH" -type f > /tmp/m2-snapshot/before.txt
+          else
+            touch /tmp/m2-snapshot/before.txt
+          fi
+
       - uses: burrunan/gradle-cache-action@v3
         name: Execute Gradle build
         if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
@@ -92,42 +101,47 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           
-          # Copy main plugin artifact
-          SOURCE="$HOME/.m2/repository/$GROUP_PATH/$ARTIFACT_ID"
-          TARGET="maven-repo/repository/$GROUP_PATH/$ARTIFACT_ID"
+          # Find all new files added by the build
+          find "$HOME/.m2/repository/$GROUP_PATH" -type f > /tmp/m2-snapshot/after.txt
           
-          mkdir -p "$TARGET"
+          # Get the list of new files
+          comm -13 /tmp/m2-snapshot/before.txt /tmp/m2-snapshot/after.txt > /tmp/m2-snapshot/new-files.txt
           
-          # Copy version-specific files
-          cp -r "$SOURCE/$VERSION" "$TARGET/"
+          echo "New files to copy:"
+          cat /tmp/m2-snapshot/new-files.txt
           
-          # Copy or update maven-metadata files
-          if [ -f "$SOURCE/maven-metadata-local.xml" ]; then
-            cp "$SOURCE/maven-metadata-local.xml" "$TARGET/"
-          fi
-          
-          # Copy plugin marker artifact
-          # Plugin marker is published at: earth.terrarium.cloche/earth.terrarium.cloche.gradle.plugin
-          MARKER_GROUP_PATH="earth/terrarium/cloche"
-          MARKER_ARTIFACT_ID="earth.terrarium.cloche.gradle.plugin"
-          PLUGIN_MARKER_SOURCE="$HOME/.m2/repository/$MARKER_GROUP_PATH/$MARKER_ARTIFACT_ID"
-          PLUGIN_MARKER_TARGET="maven-repo/repository/$MARKER_GROUP_PATH/$MARKER_ARTIFACT_ID"
-          
-          if [ -d "$PLUGIN_MARKER_SOURCE" ]; then
-            mkdir -p "$PLUGIN_MARKER_TARGET"
-            cp -r "$PLUGIN_MARKER_SOURCE/$VERSION" "$PLUGIN_MARKER_TARGET/"
-            
-            if [ -f "$PLUGIN_MARKER_SOURCE/maven-metadata-local.xml" ]; then
-              cp "$PLUGIN_MARKER_SOURCE/maven-metadata-local.xml" "$PLUGIN_MARKER_TARGET/"
+          # Copy each new file to the maven repo, preserving directory structure
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              # Extract relative path from .m2/repository/
+              relative_path="${file#$HOME/.m2/repository/}"
+              target_file="maven-repo/repository/$relative_path"
+              
+              # Create target directory
+              mkdir -p "$(dirname "$target_file")"
+              
+              # Copy file
+              cp "$file" "$target_file"
+              echo "Copied: $relative_path"
             fi
-          fi
+          done < /tmp/m2-snapshot/new-files.txt
+          
+          # Also copy/update maven-metadata files for all artifacts under GROUP_PATH
+          find "$HOME/.m2/repository/$GROUP_PATH" -name "maven-metadata-local.xml" | while read -r metadata; do
+            relative_path="${metadata#$HOME/.m2/repository/}"
+            target_dir="$(dirname "maven-repo/repository/$relative_path")"
+            mkdir -p "$target_dir"
+            cp "$metadata" "$target_dir/"
+            echo "Copied metadata: $relative_path"
+          done
 
       - name: Commit and push
         if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
         working-directory: maven-repo
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add repository/
-          git commit -m "chore(release): publish $ARTIFACT_ID ${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git commit -m "chore(release): publish version $VERSION" || echo "No changes to commit"
           git push
