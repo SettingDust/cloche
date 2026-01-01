@@ -90,7 +90,7 @@ object ClocheTargetAttribute {
 
     class CompatibilityRule : AttributeCompatibilityRule<String> {
         override fun execute(details: CompatibilityCheckDetails<String>) {
-            if (details.producerValue == INITIAL || details.consumerValue == INITIAL) {
+            if (details.producerValue ==  null || details.producerValue == INITIAL || details.consumerValue == INITIAL) {
                 details.compatible()
             }
         }
