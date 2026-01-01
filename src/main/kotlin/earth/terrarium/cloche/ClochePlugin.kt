@@ -1,10 +1,10 @@
 package earth.terrarium.cloche
 
 import earth.terrarium.cloche.ClochePlugin.Companion.IDE_SYNC_TASK_NAME
-import earth.terrarium.cloche.util.isIdeDetected
 import earth.terrarium.cloche.api.target.MinecraftTarget
 import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
 import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.util.isIdeDetected
 import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -34,7 +34,10 @@ internal fun Project.ideSyncHook() {
 
     val startParameter = project.gradle.startParameter
 
-    startParameter.setTaskNames(startParameter.taskNames + fullName)
+    val oldTaskRequests = startParameter.taskRequests
+
+    startParameter.setTaskNames(listOf(fullName))
+    startParameter.setTaskRequests(oldTaskRequests + startParameter.taskRequests)
 }
 
 fun Project.extend(
@@ -102,5 +105,21 @@ class ClochePlugin<T : PluginAware> : Plugin<T> {
 
         @JvmField
         val MINIMUM_GRADLE: GradleVersion = GradleVersion.version("9.0.0")
+
+        @JvmField
+        val VERSION: String? = ClochePlugin::class.java.`package`.implementationVersion
+
+        /**
+         * Check if a version is unobfuscated based on its name.
+         * This has been decided to be better than checking the version manifest directly to avoid downloading the version manifest at configuration time(as opposed to in a component metadata rule).
+         * Note that rubydung versions are intentionally not here, as funnily enough they were not obfuscated.
+         * This function should be both fast and accurate
+         */
+        fun isUnobfuscated(version: String) =
+            !version.startsWith("1.") && // Standard obfuscated release versions
+                    "w" !in version && // Obfuscated snapshot versions
+                    version != "3D Shareware v1.34" && // Self-explanatory
+                    !version.startsWith("b") && // Beta
+                    !version.startsWith("a") && !version.startsWith("inf") && !version.startsWith("c")
     }
 }

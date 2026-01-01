@@ -1,8 +1,10 @@
 package earth.terrarium.cloche.target.forge.neo
 
+import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
+import earth.terrarium.cloche.target.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.decodeFromStream
 import earth.terrarium.cloche.tasks.data.encodeToStream
 import earth.terrarium.cloche.tasks.data.toml
@@ -15,6 +17,7 @@ import net.peanuuutz.tomlkt.asTomlArray
 import net.peanuuutz.tomlkt.asTomlTable
 import net.peanuuutz.tomlkt.buildTomlArray
 import net.peanuuutz.tomlkt.buildTomlTable
+import org.gradle.api.artifacts.Dependency
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.provider.Provider
@@ -72,6 +75,18 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
 
         data.onConfigured {
             resolvableAttributes(::addAttributes)
+        }
+
+        val emptyList = project.provider { emptyList<Dependency>() }
+
+        project.configurations.named(sourceSet.localImplementationConfigurationName) {
+            dependencies.addAllLater(minecraftVersion.flatMap {
+                if (ClochePlugin.isUnobfuscated(it)) {
+                    (forgeDependency {}).map(::listOf)
+                } else {
+                    emptyList
+                }
+            })
         }
     }
 

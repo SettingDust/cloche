@@ -17,7 +17,6 @@ import earth.terrarium.cloche.util.fromJars
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.json.encodeToStream
 import net.msrandom.minecraftcodev.accesswidener.AccessWiden
@@ -86,7 +85,13 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
             minecraftVersion.set(this@FabricTargetImpl.minecraftVersion)
 
-            output.set(output("obf"))
+            output.set(minecraftRemapNamespace.flatMap {
+                if (it.isEmpty()) {
+                    output()
+                } else {
+                    output("obf")
+                }
+            })
         }
 
     internal val resolveClientMinecraft =
@@ -97,7 +102,13 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
             minecraftVersion.set(this@FabricTargetImpl.minecraftVersion)
 
-            output.set(output("client-obf"))
+            output.set(minecraftRemapNamespace.flatMap {
+                if (it.isEmpty()) {
+                    output("client")
+                } else {
+                    output("client-obf")
+                }
+            })
         }
 
     internal val remapCommonMinecraftIntermediary =
@@ -187,7 +198,15 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         archiveBaseName.set("$featureName-mappings")
         archiveVersion.set(null as String?)
 
-        from(loadMappingsTask.flatMap(LoadMappings::output)) {
+        val fileList = minecraftRemapNamespace.map {
+            if (it.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(loadMappingsTask.flatMap(LoadMappings::output))
+            }
+        }
+
+        from(fileList) {
             into("mappings")
         }
     }
@@ -195,10 +214,19 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
     val writeRemapClasspathTask: TaskProvider<WriteClasspathFile> = project.tasks.register<WriteClasspathFile>(
         lowerCamelCaseGradleName("write", featureName, "remapClasspath"),
     ) {
-        classpath.from(commonLibrariesConfiguration)
-        classpath.from(clientLibrariesConfiguration)
-        classpath.from(remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile))
+        val classpaths = minecraftRemapNamespace.map {
+            if (it.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    commonLibrariesConfiguration,
+                    clientLibrariesConfiguration,
+                    remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                )
+            }
+        }
 
+        classpath.from(classpaths)
         separator.set(File.pathSeparator)
     }
 
@@ -213,6 +241,34 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
     ) {
         classpath.from(clientLibrariesConfiguration)
     }
+
+    private val commonJar = minecraftRemapNamespace.flatMap {
+        if (it.isEmpty()) {
+            resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
+        } else {
+            remapCommon.flatMap(RemapTask::outputFile)
+        }
+    }
+
+    private val clientJar = minecraftRemapNamespace.flatMap {
+        if (it.isEmpty()) {
+            resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
+        } else {
+            remapClient.flatMap(RemapTask::outputFile)
+        }
+    }
+
+    private val intermediaryClasspath = project.files(minecraftRemapNamespace.map {
+        if (it.isEmpty()) {
+            emptyList()
+        } else {
+            // TODO Once client splitting is done, we might not always need the client Jar
+            listOf(
+                remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile),
+            )
+        }
+    })
 
     override val finalJar: Provider<out Jar>
         get() = client.value.flatMap {
@@ -231,12 +287,9 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                 FabricCompilationInfo(
                     ClochePlugin.CLIENT_COMPILATION_NAME,
                     this,
-                    project.files(
-                        remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
-                        remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile),
-                    ),
-                    remapCommon.flatMap(RemapTask::outputFile),
-                    remapClient.flatMap(RemapTask::outputFile),
+                    intermediaryClasspath,
+                    commonJar,
+                    clientJar,
                     main.finalMinecraftFile,
                     data = false,
                     test = false,
@@ -285,8 +338,23 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
     protected abstract val providerFactory: ProviderFactory
         @Inject get
 
-    final override val minecraftRemapNamespace: Provider<String>
-        get() = providerFactory.provider { MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE }
+    override val minecraftRemapNamespace: Provider<String>
+        get() = minecraftVersion.zip(mappings.isDefault) { version, isDefault ->
+            if (isDefault && ClochePlugin.isUnobfuscated(version)) {
+                ""
+            } else {
+                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE
+            }
+        }
+
+    override val modRemapNamespace: Provider<String>
+        get() = minecraftVersion.zip(mappings.isOfficialCompatible) { version, isOfficialCompatible ->
+            if (isOfficialCompatible && ClochePlugin.isUnobfuscated(version)) {
+                ""
+            } else {
+                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE
+            }
+        }
 
     override val hasSeparateClient = client.isConfigured
 
@@ -359,8 +427,16 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private fun output(suffix: String) = outputDirectory.zip(minecraftVersion) { dir, version ->
-        dir.file("minecraft-$version-$suffix.jar")
+    private fun output(suffix: String? = null) = outputDirectory.zip(minecraftVersion) { dir, version ->
+        dir.file(buildString {
+            append("minecraft-$version")
+
+            if (suffix != null) {
+                append("-$suffix")
+            }
+
+            append(".jar")
+        })
     }
 
     private fun registerCommonCompilation(name: String): FabricCompilationImpl {
@@ -368,7 +444,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             this,
             lowerCamelCaseGradleName(name.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals), "common"),
             compilationSourceSet(this, name),
-            remapCommon.flatMap(RemapTask::outputFile),
+            commonJar,
             project.provider { emptyList() },
         ).accessWidenTask
 
@@ -376,19 +452,13 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             accessWideners.from(this@FabricTargetImpl.accessWideners)
         }
 
-        // TODO Once client splitting is done, we might not always need the client Jar
-        val intermediateClasspath = project.files(
-            remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
-            remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile),
-        )
-
         return project.objects.newInstance<FabricCompilationImpl>(
             FabricCompilationInfo(
                 name,
                 this,
-                intermediateClasspath,
-                remapCommon.flatMap(RemapTask::outputFile),
-                remapClient.flatMap(RemapTask::outputFile),
+                intermediaryClasspath,
+                commonJar,
+                clientJar,
                 commonTask.flatMap(AccessWiden::outputFile),
                 name == ClochePlugin.DATA_COMPILATION_NAME,
                 name == SourceSet.TEST_SOURCE_SET_NAME,
@@ -435,16 +505,12 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     val metadata: JsonObject = modJsonPath.inputStream().use(json::decodeFromStream)
 
                     val accessWidenerElement = metadata["accessWidener"]
+
                     if (accessWidenerElement != null && accessWidenerElement !is JsonNull) {
                         return@use
                     }
 
-                    val newMetadata = buildJsonObject {
-                        put("accessWidener", JsonPrimitive(accessWidenerFileName))
-                        for ((key, value) in metadata) {
-                            put(key, value)
-                        }
-                    }
+                    val newMetadata = JsonObject(metadata + ("accessWidener" to JsonPrimitive(accessWidenerFileName)))
 
                     modJsonPath.outputStream().use {
                         json.encodeToStream(newMetadata, it)

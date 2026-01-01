@@ -211,8 +211,9 @@ private fun setupModTransformationPipeline(
                     .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
                     .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                compilation.attributes(from)
-                compilation.attributes(to)
+            // Is the usage of the base attributes correct here?
+            compilation.baseAttributes(from)
+            compilation.baseAttributes(to)
 
                 parameters {
                     val compileClasspath =
