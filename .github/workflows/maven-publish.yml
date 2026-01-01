@@ -92,6 +92,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           
+          # Copy main plugin artifact
           SOURCE="$HOME/.m2/repository/$GROUP_PATH/$ARTIFACT_ID"
           TARGET="maven-repo/repository/$GROUP_PATH/$ARTIFACT_ID"
           
@@ -103,6 +104,19 @@ jobs:
           # Copy or update maven-metadata files
           if [ -f "$SOURCE/maven-metadata-local.xml" ]; then
             cp "$SOURCE/maven-metadata-local.xml" "$TARGET/"
+          fi
+          
+          # Copy plugin marker artifact
+          PLUGIN_MARKER_SOURCE="$HOME/.m2/repository/$GROUP_PATH/$ARTIFACT_ID/$GROUP_PATH.$ARTIFACT_ID.gradle.plugin"
+          PLUGIN_MARKER_TARGET="maven-repo/repository/$GROUP_PATH/$ARTIFACT_ID/$GROUP_PATH.$ARTIFACT_ID.gradle.plugin"
+          
+          if [ -d "$PLUGIN_MARKER_SOURCE" ]; then
+            mkdir -p "$PLUGIN_MARKER_TARGET"
+            cp -r "$PLUGIN_MARKER_SOURCE/$VERSION" "$PLUGIN_MARKER_TARGET/"
+            
+            if [ -f "$PLUGIN_MARKER_SOURCE/maven-metadata-local.xml" ]; then
+              cp "$PLUGIN_MARKER_SOURCE/maven-metadata-local.xml" "$PLUGIN_MARKER_TARGET/"
+            fi
           fi
 
       - name: Commit and push
