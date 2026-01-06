@@ -178,8 +178,8 @@ private fun setupModTransformationPipeline(
                     from.attribute(REMAPPED_ATTRIBUTE, false)
                     to.attribute(REMAPPED_ATTRIBUTE, true)
 
-                    compilation.attributes(from)
-                    compilation.attributes(to)
+                    compilation.baseAttributes(from)
+                    compilation.baseAttributes(to)
                 }
                 continue
             }
@@ -195,8 +195,9 @@ private fun setupModTransformationPipeline(
                     .attribute(REMAPPED_ATTRIBUTE, true)
                     .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
-                compilation.attributes(from)
-                compilation.attributes(to)
+            // Is the usage of the base attributes correct here?
+            compilation.baseAttributes(from)
+            compilation.baseAttributes(to)
 
                 parameters {
                     val compileClasspath =

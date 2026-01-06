@@ -22,7 +22,6 @@ gradlePlugin {
 }
 
 repositories {
-    mavenLocal()
     mavenCentral()
 
     maven(url = "https://maven.fabricmc.net/")
@@ -38,19 +37,19 @@ java {
 }
 
 dependencies {
-    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.5")
-    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.6.9")
+    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.6")
+    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.7.1")
     implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.6.11")
     implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.6.0")
     implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.6.7")
     implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.0")
     implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.6.8")
     implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
-    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.5")
-    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.10")
+    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6")
+    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.12")
 
     implementation(group = "net.peanuuutz.tomlkt", name = "tomlkt", version = "0.5.0")
     implementation(group = "org.apache.groovy", name = "groovy-toml", version = "5.0.2")
@@ -67,6 +66,16 @@ tasks.compileKotlin {
     compilerOptions {
         jvmDefault = JvmDefaultMode.ENABLE
         compilerOptions.freeCompilerArgs.add("-Xcontext-receivers")
+    }
+}
+
+tasks.jar {
+    manifest {
+        attributes(
+            "Implementation-Title" to project.name,
+            "Implementation-Version" to project.version,
+            "Implementation-Vendor" to "terrarium-earth",
+        )
     }
 }
 

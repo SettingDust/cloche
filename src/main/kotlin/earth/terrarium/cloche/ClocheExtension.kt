@@ -16,8 +16,6 @@ import earth.terrarium.cloche.target.CommonTargetInternal
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
 import earth.terrarium.cloche.target.forge.neo.NeoForgeTargetImpl
-import groovy.lang.Closure
-import groovy.lang.DelegatesTo
 import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.fabric.FabricInstallerComponentMetadataRule
 import net.msrandom.minecraftcodev.forge.RemoveNameMappingService
@@ -60,24 +58,6 @@ internal fun loader(type: Class<out MinecraftTarget>) = when {
 
 @JvmDefaultWithoutCompatibility
 interface SimpleTargetContainer {
-    fun fabric(@DelegatesTo(FabricTarget::class) configure: Closure<*>): FabricTarget = fabric {
-        val owner = this@SimpleTargetContainer
-
-        configure.rehydrate(this, owner, owner).call()
-    }
-
-    fun forge(@DelegatesTo(ForgeTarget ::class) configure: Closure<*>): ForgeTarget = forge {
-        val owner = this@SimpleTargetContainer
-
-        configure.rehydrate(this, owner, owner).call()
-    }
-
-    fun neoforge(@DelegatesTo(NeoforgeTarget ::class) configure: Closure<*>): NeoforgeTarget = neoforge {
-        val owner = this@SimpleTargetContainer
-
-        configure.rehydrate(this, owner, owner).call()
-    }
-
     fun fabric(configure: Action<FabricTarget>): FabricTarget
     fun forge(configure: Action<ForgeTarget>): ForgeTarget
     fun neoforge(configure: Action<NeoforgeTarget>): NeoforgeTarget
@@ -247,45 +227,20 @@ open class ClocheExtension @Inject constructor(private val project: Project, obj
     private fun common(): CommonTarget = common(MinecraftModLoader.common.name)
 
     fun common(name: String): CommonTarget = common(name) {}
-    fun common(@DelegatesTo(CommonTarget::class) configure: Closure<*>): CommonTarget = common(MinecraftModLoader.common.name, configure)
     fun common(configure: Action<CommonTarget>): CommonTarget = common(MinecraftModLoader.common.name, configure)
-
-    fun common(name: String, @DelegatesTo(CommonTarget::class) configure: Closure<*>): CommonTarget = common(name) {
-        val owner = this@ClocheExtension
-
-        configure.rehydrate(this, owner, owner).call()
-    }
 
     fun common(name: String, configure: Action<CommonTarget>): CommonTarget =
         commonTargets.maybeCreate(name).also(configure::execute)
 
     override fun fabric(configure: Action<FabricTarget>): FabricTarget = fabric(MinecraftModLoader.fabric.name, configure)
 
-    fun fabric(name: String, @DelegatesTo(FabricTarget::class) configure: Closure<*>): FabricTarget = fabric(name) {
-        val owner = this@ClocheExtension
-
-        configure.rehydrate(this, owner, owner).call()
-    }
-
     fun fabric(name: String, configure: Action<FabricTarget>): FabricTarget = target(name, configure)
 
     override fun forge(configure: Action<ForgeTarget>): ForgeTarget = forge(MinecraftModLoader.forge.name, configure)
 
-    fun forge(name: String, @DelegatesTo(ForgeTarget::class) configure: Closure<*>): ForgeTarget = forge(name) {
-        val owner = this@ClocheExtension
-
-        configure.rehydrate(this, owner, owner).call()
-    }
-
     fun forge(name: String, configure: Action<ForgeTarget>): ForgeTarget = target(name, configure)
 
     override fun neoforge(configure: Action<NeoforgeTarget>): NeoforgeTarget = neoforge(MinecraftModLoader.neoforge.name, configure)
-
-    fun neoforge(name: String, @DelegatesTo(NeoforgeTarget::class) configure: Closure<*>): NeoforgeTarget = neoforge(name) {
-        val owner = this@ClocheExtension
-
-        configure.rehydrate(this, owner, owner).call()
-    }
 
     fun neoforge(name: String, configure: Action<NeoforgeTarget>): NeoforgeTarget = target(name, configure)
 

@@ -5,8 +5,6 @@ import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.run.RunConfigurations
 import earth.terrarium.cloche.api.target.compilation.CommonSecondarySourceSets
 import earth.terrarium.cloche.loader
-import groovy.lang.Closure
-import groovy.lang.DelegatesTo
 import org.gradle.api.Action
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.plugins.jvm.PlatformDependencyModifiers
@@ -50,10 +48,4 @@ interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDep
     fun mappings(action: Action<MappingsBuilder>)
 
     fun runs(action: Action<RunConfigurations>)
-
-    fun runs(@DelegatesTo(RunConfigurations::class) closure: Closure<*>) = runs {
-        val owner = this@MinecraftTarget
-
-        closure.rehydrate(this, owner, owner).call()
-    }
 }

@@ -1,8 +1,6 @@
 package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
-import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
@@ -13,7 +11,6 @@ import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.patchesConfigurationName
 import net.msrandom.minecraftcodev.forge.task.GenerateAccessTransformer
-import net.msrandom.minecraftcodev.forge.task.JarJar
 import net.msrandom.minecraftcodev.forge.task.ResolvePatchedMinecraft
 import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
 import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
@@ -24,7 +21,6 @@ import org.gradle.api.Action
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.attributes.Usage
-import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.SourceSet
@@ -95,13 +91,20 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
     }
 
+    private val clientExtra = project.files(minecraftVersion.map {
+        if (ClochePlugin.isUnobfuscated(it)) {
+            emptyList()
+        } else {
+            listOf(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra))
+        }
+    })
+
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
             project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
             minecraftFile,
-            project.provider { null },
             data = false,
             test = false,
             providerFactory = providerFactory,
@@ -115,7 +118,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
                 this,
                 project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
                 minecraftFile,
-                main.finalMinecraftFile,
                 data = true,
                 test = false,
                 providerFactory = providerFactory,
@@ -123,31 +125,30 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         data.dependencies {
-            runtimeOnly.add(project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)))
+            runtimeOnly.add(clientExtra)
         }
 
         data
     }
 
     final override val test: LazyConfigurableInternal<ForgeCompilationImpl> = project.lazyConfigurable {
-        val data = objectFactory.newInstance<ForgeCompilationImpl>(
+        val test = objectFactory.newInstance<ForgeCompilationImpl>(
             ForgeCompilationInfo(
                 SourceSet.TEST_SOURCE_SET_NAME,
                 this,
                 project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
                 minecraftFile,
-                main.finalMinecraftFile,
                 data = false,
                 test = true,
                 providerFactory = providerFactory,
             ),
         )
 
-        data.dependencies {
-            runtimeOnly.add(project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)))
+        test.dependencies {
+            runtimeOnly.add(clientExtra)
         }
 
-        data
+        test
     }
 
     protected abstract val providerFactory: ProviderFactory
@@ -183,7 +184,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         project.dependencies.add(
             sourceSet.runtimeOnlyConfigurationName,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra)),
+            clientExtra,
         )
 
         val userdev = forgeDependency {
@@ -215,7 +216,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             start.set(version)
         }
 
-    private fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
+    protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
         minecraftVersion.flatMap { minecraftVersion ->
             loaderVersion.map { forgeVersion ->
                 dependencyFactory.create(group, artifact, null).apply {

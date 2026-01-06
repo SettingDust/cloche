@@ -1,33 +1,23 @@
 package earth.terrarium.cloche.target.forge.neo
 
+import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.target.NeoforgeTarget
-import earth.terrarium.cloche.modId
 import earth.terrarium.cloche.target.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
-import earth.terrarium.cloche.tasks.data.FabricMod
-import earth.terrarium.cloche.tasks.data.NeoForgeMods
+import earth.terrarium.cloche.target.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.decodeFromStream
 import earth.terrarium.cloche.tasks.data.encodeToStream
 import earth.terrarium.cloche.tasks.data.toml
-import kotlinx.serialization.json.decodeFromStream
-import kotlinx.serialization.json.encodeToStream
-import net.msrandom.minecraftcodev.core.MinecraftCodevPlugin.Companion.json
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.zipFileSystem
-import net.msrandom.minecraftcodev.fabric.MinecraftCodevFabricPlugin
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
-import net.peanuuutz.tomlkt.TomlArray
-import net.peanuuutz.tomlkt.TomlTable
-import net.peanuuutz.tomlkt.asTomlArray
-import net.peanuuutz.tomlkt.asTomlTable
-import net.peanuuutz.tomlkt.buildTomlArray
-import net.peanuuutz.tomlkt.buildTomlTable
+import net.peanuuutz.tomlkt.*
+import org.gradle.api.artifacts.Dependency
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.named
-import java.util.jar.JarFile
 import javax.inject.Inject
 import kotlin.io.path.exists
 import kotlin.io.path.inputStream
@@ -80,6 +70,18 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
 
         data.onConfigured {
             it.resolvableAttributes(::addAttributes)
+        }
+
+        val emptyList = project.provider { emptyList<Dependency>() }
+
+        project.configurations.named(sourceSet.localImplementationConfigurationName) {
+            dependencies.addAllLater(minecraftVersion.flatMap {
+                if (ClochePlugin.isUnobfuscated(it)) {
+                    (forgeDependency {}).map(::listOf)
+                } else {
+                    emptyList
+                }
+            })
         }
     }
 
