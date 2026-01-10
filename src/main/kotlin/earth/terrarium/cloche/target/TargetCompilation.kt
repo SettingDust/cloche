@@ -1,14 +1,10 @@
 package earth.terrarium.cloche.target
 
-import earth.terrarium.cloche.ClocheTargetAttribute
-import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
-import earth.terrarium.cloche.NoopAction
-import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
+import earth.terrarium.cloche.*
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.util.fromJars
 import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.accesswidener.AccessWiden
@@ -211,9 +207,9 @@ private fun setupModTransformationPipeline(
                     .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
                     .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-            // Is the usage of the base attributes correct here?
-            compilation.baseAttributes(from)
-            compilation.baseAttributes(to)
+                // Is the usage of the base attributes correct here?
+                compilation.baseAttributes(from)
+                compilation.baseAttributes(to)
 
                 parameters {
                     val compileClasspath =
