@@ -16,6 +16,8 @@ val ClocheTarget.isSingleTarget
 interface ClocheTarget : TargetTreeElement {
     val dependsOn: DomainObjectCollection<CommonTarget>
 
+    val stubSources: DomainObjectCollection<CommonTarget>
+
     val featureName
         get() = targetName?.let { lowerCamelCaseGradleName(it) }
 
@@ -31,5 +33,9 @@ interface ClocheTarget : TargetTreeElement {
 
     fun dependsOn(vararg common: CommonTarget) {
         dependsOn.addAll(listOf(*common))
+    }
+
+    fun stubSources(vararg common: CommonTarget) {
+        stubSources.addAll(listOf(*common))
     }
 }

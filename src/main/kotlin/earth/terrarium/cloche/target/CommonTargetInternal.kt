@@ -19,7 +19,7 @@ import org.gradle.kotlin.dsl.setProperty
 import javax.inject.Inject
 
 private fun collectTargetDependencies(target: ClocheTarget): Set<CommonTarget> =
-    (target.dependsOn + target.dependsOn.flatMap { collectTargetDependencies(it) }).toSet()
+    (target.dependsOn + target.stubSources + (target.dependsOn + target.stubSources).flatMap { collectTargetDependencies(it) }).toSet()
 
 private fun <T> Iterable<T>.sharedValue(): T? {
     val iterator = iterator()
@@ -69,6 +69,9 @@ internal abstract class CommonTargetInternal @Inject constructor(
         project.objects.domainObjectSet(Action::class) as DomainObjectCollection<Action<CommonMetadata>>
 
     override val dependsOn: DomainObjectCollection<CommonTarget> =
+        project.objects.domainObjectSet(CommonTarget::class)
+
+    override val stubSources: DomainObjectCollection<CommonTarget> =
         project.objects.domainObjectSet(CommonTarget::class)
 
     override val dependents: Provider<List<MinecraftTarget>> = run {

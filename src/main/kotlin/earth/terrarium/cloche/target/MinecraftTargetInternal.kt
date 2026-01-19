@@ -45,6 +45,9 @@ internal abstract class MinecraftTargetInternal(
     override val dependsOn: DomainObjectCollection<CommonTarget> =
         project.objects.domainObjectSet(CommonTarget::class)
 
+    override val stubSources: DomainObjectCollection<CommonTarget> =
+        project.objects.domainObjectSet(CommonTarget::class)
+
     open val modRemapNamespace: Provider<String>
         @Internal get() = minecraftRemapNamespace
 
