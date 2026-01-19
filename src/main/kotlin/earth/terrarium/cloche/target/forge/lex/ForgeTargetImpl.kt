@@ -57,6 +57,10 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
             .attribute(NO_NAME_MAPPING_ATTRIBUTE, true)
             .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
+        resolvePatchedMinecraft.configure {
+            neoforge.set(false)
+        }
+
         project.dependencies.registerTransform(RemoveNameMappingService::class) {
             from
                 .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
