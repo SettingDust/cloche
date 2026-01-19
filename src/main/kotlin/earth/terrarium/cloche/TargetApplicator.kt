@@ -2,10 +2,8 @@ package earth.terrarium.cloche
 
 import earth.terrarium.cloche.target.CommonCompilation
 import earth.terrarium.cloche.target.CommonTargetInternal
-import earth.terrarium.cloche.target.CommonTopLevelCompilation
 import earth.terrarium.cloche.target.CompilationInternal
 import earth.terrarium.cloche.target.MinecraftTargetInternal
-import earth.terrarium.cloche.target.fabric.FabricClientSecondarySourceSets
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import net.msrandom.minecraftcodev.core.MinecraftDependenciesOperatingSystemMetadataRule
 import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
@@ -24,50 +22,15 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
 
         addTarget(cloche, project, target)
 
+        val linked = mutableSetOf<CommonTargetInternal>()
+        val clientLinked = mutableSetOf<CommonTargetInternal>()
+
         target.dependsOn.all {
-            val dependency = this
-
-            dependency as CommonTargetInternal
-
-            fun CommonTargetInternal.setDependenciesWithClient(targetClient: FabricClientSecondarySourceSets): CommonTopLevelCompilation {
-                targetClient.data.onConfigured {
-                    data.configure()
-                }
-
-                targetClient.test.onConfigured {
-                    test.configure()
-                }
-
-                dependsOn.all {
-                    this as CommonTargetInternal
-
-                    setDependenciesWithClient(targetClient)
-                }
-
-                return client()
-            }
-
-            fun CommonTargetInternal.setDependenciesWithData(): CommonCompilation {
-                dependsOn.all {
-                    this as CommonTargetInternal
-
-                    setDependenciesWithData()
-                }
-
-                return data()
-            }
-
-            fun CommonTargetInternal.setDependenciesWithTest(): CommonCompilation {
-                dependsOn.all {
-                    this as CommonTargetInternal
-
-                    setDependenciesWithTest()
-                }
-
-                return test()
-            }
+            val dependency = this as CommonTargetInternal
 
             fun CommonTargetInternal.addIncludedClientWeakLinks(info: SourceSetStaticLinkageInfo) {
+                if (!clientLinked.add(this)) return
+
                 client.onConfigured {
                     it.data.onConfigured { data ->
                         this.data.onConfigured { commonData ->
@@ -88,65 +51,75 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
                 }
 
                 dependsOn.all {
-                    this as CommonTargetInternal
-
-                    addIncludedClientWeakLinks(info)
+                    (this as CommonTargetInternal).addIncludedClientWeakLinks(info)
                 }
             }
 
-            with(project) {
-                target.data.onConfigured { data ->
-                    val dependency = dependency.setDependenciesWithData()
+            fun link(dependency: CommonTargetInternal) {
+                if (!linked.add(dependency)) return
 
-                    data.addSourceDependency(dependency)
-                }
-
-                target.test.onConfigured { test ->
-                    val dependency = dependency.setDependenciesWithTest()
-
-                    test.addSourceDependency(dependency)
-                }
-
-                if (target is FabricTargetImpl) {
-                    target.client.onConfigured {
-                        val dependency = dependency.setDependenciesWithClient(it)
-
-                        it.addSourceDependency(dependency)
-
-                        it.data.onConfigured { data ->
-                            data.addSourceDependency(dependency.data())
-                        }
-
-                        it.test.onConfigured { test ->
-                            test.addSourceDependency(dependency.test())
-                        }
+                with(project) {
+                    target.data.onConfigured { data ->
+                        data.addSourceDependency(dependency.data())
                     }
-                }
 
-                val staticLinkage = target.sourceSet.extension<SourceSetStaticLinkageInfo>()
+                    target.test.onConfigured { test ->
+                        test.addSourceDependency(dependency.test())
+                    }
 
-                target.main.addSourceDependency(dependency.main)
+                    if (target is FabricTargetImpl) {
+                        target.client.onConfigured { client ->
+                            client.addSourceDependency(dependency.client())
 
-                target.onClientIncluded {
-                    dependency.client.onConfigured { client ->
-                        target.main.addSourceDependency(client)
-
-                        target.data.onConfigured { targetData ->
-                            client.data.onConfigured { clientData ->
-                                targetData.addSourceDependency(clientData)
+                            client.data.onConfigured { data ->
+                                data.addSourceDependency(dependency.data())
                             }
-                        }
 
-                        target.test.onConfigured { targetTest ->
-                            client.test.onConfigured { clientTest ->
-                                targetTest.addSourceDependency(clientTest)
+                            client.test.onConfigured { test ->
+                                test.addSourceDependency(dependency.test())
+                            }
+
+                            client.data.onConfigured {
+                                dependency.data.configure()
+                            }
+
+                            client.test.onConfigured {
+                                dependency.test.configure()
                             }
                         }
                     }
 
-                    dependency.addIncludedClientWeakLinks(staticLinkage)
+                    val staticLinkage = target.sourceSet.extension<SourceSetStaticLinkageInfo>()
+
+                    target.main.addSourceDependency(dependency.main)
+
+                    target.onClientIncluded {
+                        dependency.client.onConfigured { client ->
+                            target.main.addSourceDependency(client)
+
+                            target.data.onConfigured { targetData ->
+                                client.data.onConfigured { clientData ->
+                                    targetData.addSourceDependency(clientData)
+                                }
+                            }
+
+                            target.test.onConfigured { targetTest ->
+                                client.test.onConfigured { clientTest ->
+                                    targetTest.addSourceDependency(clientTest)
+                                }
+                            }
+                        }
+
+                        dependency.addIncludedClientWeakLinks(staticLinkage)
+                    }
+                }
+
+                dependency.dependsOn.all {
+                    link(this as CommonTargetInternal)
                 }
             }
+
+            link(dependency)
         }
     }
 
@@ -155,48 +128,58 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
 
         commonTarget as CommonTargetInternal
 
+        val linked = mutableSetOf<CommonTargetInternal>()
+
         commonTarget.dependsOn.all {
-            val dependency = this
+            val dependency = this as CommonTargetInternal
 
-            dependency as CommonTargetInternal
+            fun link(dependency: CommonTargetInternal) {
+                if (!linked.add(dependency)) return
 
-            with(project) {
-                fun add(compilation: CompilationInternal, dependencyCompilation: CommonCompilation) {
-                    compilation.addSourceDependency(dependencyCompilation)
-                }
-
-                add(commonTarget.main, dependency.main)
-
-                commonTarget.data.onConfigured { data ->
-                    dependency.data.onConfigured { dependencyData ->
-                        add(data, dependencyData)
+                with(project) {
+                    fun add(compilation: CompilationInternal, dependencyCompilation: CommonCompilation) {
+                        compilation.addSourceDependency(dependencyCompilation)
                     }
-                }
 
-                commonTarget.test.onConfigured { test ->
-                    dependency.test.onConfigured { dependencyTest ->
-                        add(test, dependencyTest)
-                    }
-                }
+                    add(commonTarget.main, dependency.main)
 
-                commonTarget.client.onConfigured { client ->
-                    dependency.client.onConfigured { dependencyClient ->
-                        add(client, dependencyClient)
-
-                        commonTarget.data.onConfigured { data ->
-                            dependency.data.onConfigured { dependencyData ->
-                                add(data, dependencyData)
-                            }
-                        }
-
-                        commonTarget.test.onConfigured { test ->
-                            dependency.test.onConfigured { dependencyTest ->
-                                add(test, dependencyTest)
-                            }
+                    commonTarget.data.onConfigured { data ->
+                        dependency.data.onConfigured { dependencyData ->
+                            add(data, dependencyData)
                         }
                     }
+
+                    commonTarget.test.onConfigured { test ->
+                        dependency.test.onConfigured { dependencyTest ->
+                            add(test, dependencyTest)
+                        }
+                    }
+
+                    commonTarget.client.onConfigured { client ->
+                        dependency.client.onConfigured { dependencyClient ->
+                            add(client, dependencyClient)
+
+                            commonTarget.data.onConfigured { data ->
+                                dependency.data.onConfigured { dependencyData ->
+                                    add(data, dependencyData)
+                                }
+                            }
+
+                            commonTarget.test.onConfigured { test ->
+                                dependency.test.onConfigured { dependencyTest ->
+                                    add(test, dependencyTest)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                dependency.dependsOn.all {
+                    link(this as CommonTargetInternal)
                 }
             }
+
+            link(dependency)
         }
 
         with(project) {
