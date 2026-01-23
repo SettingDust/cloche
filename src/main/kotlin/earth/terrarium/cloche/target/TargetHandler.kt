@@ -1,35 +1,18 @@
 package earth.terrarium.cloche.target
 
-import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
-import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
-import earth.terrarium.cloche.addClasspathDependency
-import earth.terrarium.cloche.addDataClasspathDependency
+import earth.terrarium.cloche.*
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
-import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
-import earth.terrarium.cloche.target.compilation.TargetCompilation
-import earth.terrarium.cloche.target.compilation.configureSourceSet
-import earth.terrarium.cloche.target.compilation.createCompilationVariants
-import earth.terrarium.cloche.target.compilation.externalApiConfigurationName
-import earth.terrarium.cloche.target.compilation.externalCompileConfigurationName
-import earth.terrarium.cloche.target.compilation.externalRuntimeConfigurationName
-import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
-import earth.terrarium.cloche.target.compilation.localRuntimeConfigurationName
-import earth.terrarium.cloche.target.compilation.modConfigurationName
-import earth.terrarium.cloche.target.compilation.resolvableModConfigurationName
-import earth.terrarium.cloche.target.compilation.resolvableNonModConfigurationName
-import earth.terrarium.cloche.target.compilation.sourceSetName
+import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.target.compilation.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import earth.terrarium.cloche.util.optionalDir
 import earth.terrarium.cloche.util.withIdeaModule
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
-import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
 import net.msrandom.minecraftcodev.core.getVersionList
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.task.CachedMinecraftParameters
 import net.msrandom.minecraftcodev.core.utils.extension
-import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.runs.downloadAssetsTaskName
 import net.msrandom.minecraftcodev.runs.extractNativesTaskName
@@ -50,11 +33,11 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.kotlin.dsl.named
+import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import org.gradle.kotlin.dsl.named
-import org.gradle.kotlin.dsl.register
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
@@ -256,16 +239,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             target.addJarInjects(compilation)
         }
 
-        val javaVersion = target.minecraftVersion.map {
-            getVersionList(
-                getGlobalCacheDirectory(project).toPath(),
-                VERSION_MANIFEST_URL,
-                gradle.startParameter.isOffline
-            )
-                .version(it)
-                .javaVersion
-                .majorVersion
-        }
+        val javaVersion = target.jvmVersion
 
         // TODO do the same for the javadoc tasks
         tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
