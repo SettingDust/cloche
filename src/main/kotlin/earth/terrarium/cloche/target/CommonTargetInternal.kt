@@ -111,6 +111,12 @@ internal abstract class CommonTargetInternal @Inject constructor(
         dependants.map { (it as MinecraftTargetInternal).loaderName }.sharedValue()
     }
 
+    val jvmVersion: Provider<Int> = dependents.map { dependants ->
+        dependants.minOfOrNull {
+            (it as MinecraftTargetInternal).jvmVersion.get()
+        }
+    }
+
     override fun getName() = name
 
     override fun withJavadocJar() = main.withJavadocJar()

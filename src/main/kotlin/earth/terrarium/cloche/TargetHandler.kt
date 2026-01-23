@@ -3,23 +3,14 @@ package earth.terrarium.cloche
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.target.MinecraftTargetInternal
-import earth.terrarium.cloche.target.TargetCompilation
-import earth.terrarium.cloche.target.addCollectedDependencies
-import earth.terrarium.cloche.target.configureSourceSet
+import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
-import earth.terrarium.cloche.target.localImplementationConfigurationName
-import earth.terrarium.cloche.target.localRuntimeConfigurationName
-import earth.terrarium.cloche.target.modConfigurationName
-import earth.terrarium.cloche.target.sourceSetName
 import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
-import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
 import net.msrandom.minecraftcodev.core.getVersionList
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.task.CachedMinecraftParameters
 import net.msrandom.minecraftcodev.core.utils.extension
-import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.runs.downloadAssetsTaskName
 import net.msrandom.minecraftcodev.runs.extractNativesTaskName
@@ -182,16 +173,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             target.addJarInjects(compilation)
         }
 
-        val javaVersion = target.minecraftVersion.map {
-            getVersionList(
-                getGlobalCacheDirectory(project).toPath(),
-                VERSION_MANIFEST_URL,
-                gradle.startParameter.isOffline
-            )
-                .version(it)
-                .javaVersion
-                .majorVersion
-        }
+        val javaVersion = target.jvmVersion
 
         // TODO do the same for the javadoc tasks
         tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {

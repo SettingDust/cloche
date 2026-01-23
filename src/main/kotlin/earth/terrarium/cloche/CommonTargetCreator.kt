@@ -3,29 +3,15 @@
 package earth.terrarium.cloche
 
 import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
-import earth.terrarium.cloche.api.attributes.CommonTargetAttributes
-import earth.terrarium.cloche.api.attributes.CompilationAttributes
-import earth.terrarium.cloche.api.attributes.MinecraftModLoader
-import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.api.attributes.TargetAttributes
+import earth.terrarium.cloche.api.attributes.*
 import earth.terrarium.cloche.api.target.targetName
-import earth.terrarium.cloche.target.CommonCompilation
-import earth.terrarium.cloche.target.CommonTargetInternal
-import earth.terrarium.cloche.target.CommonTopLevelCompilation
-import earth.terrarium.cloche.target.MinecraftTargetInternal
-import earth.terrarium.cloche.target.TargetCompilation
-import earth.terrarium.cloche.target.addCollectedDependencies
-import earth.terrarium.cloche.target.configureSourceSet
+import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
-import earth.terrarium.cloche.target.getNonProjectArtifacts
-import earth.terrarium.cloche.target.getRelevantSyncArtifacts
-import earth.terrarium.cloche.target.localImplementationConfigurationName
-import earth.terrarium.cloche.target.localRuntimeConfigurationName
-import earth.terrarium.cloche.target.modConfigurationName
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.stubs.GenerateStubApi
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ConfigurationContainer
+import org.gradle.api.attributes.java.TargetJvmVersion
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
@@ -250,6 +236,8 @@ internal fun createCommonTarget(
         )
 
         compilation.attributes {
+            attributeProvider(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, commonTarget.jvmVersion)
+
             attribute(CompilationAttributes.DISTRIBUTION, variant)
             attribute(CompilationAttributes.CLOCHE_SIDE, variant.legacyName)
             attribute(CompilationAttributes.DATA, data)
