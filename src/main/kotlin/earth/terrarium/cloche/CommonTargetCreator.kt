@@ -9,6 +9,7 @@ import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.stubs.GenerateStubApi
+import org.gradle.api.JavaVersion
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.attributes.java.TargetJvmVersion
@@ -24,7 +25,9 @@ import org.gradle.kotlin.dsl.listProperty
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.register
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.PLUGIN_CLASSPATH_CONFIGURATION_NAME
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 private const val GENERATE_JAVA_EXPECT_STUBS_OPTION = "generateExpectStubs"
 
@@ -77,6 +80,8 @@ internal fun createCommonTarget(
 
         val generateStub = tasks.register<GenerateStubApi>(name) {
             group = "minecraft-stubs"
+
+            preserveMethodBodies.set(true)
 
             val jarName = compilation.capabilitySuffix.map {
                 "${commonTarget.capabilitySuffix}-$it"
@@ -289,6 +294,7 @@ internal fun createCommonTarget(
 
         tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
             options.compilerArgs.add("-A$GENERATE_JAVA_EXPECT_STUBS_OPTION")
+            options.release.set(commonTarget.jvmVersion)
         }
 
         plugins.withId(KOTLIN_JVM_PLUGIN_ID) {
@@ -303,6 +309,12 @@ internal fun createCommonTarget(
                 sourceSet.compileOnlyConfigurationName,
                 "net.msrandom:kmp-stub-annotations:1.0.0",
             )
+
+            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
+                compilerOptions.jvmTarget.set(commonTarget.jvmVersion.map {
+                    JvmTarget.fromTarget(JavaVersion.toVersion(it).toString())
+                })
+            }
         }
     }
 
