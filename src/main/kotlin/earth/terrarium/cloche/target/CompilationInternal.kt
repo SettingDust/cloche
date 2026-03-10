@@ -62,7 +62,7 @@ internal abstract class CompilationInternal : Compilation, Dependencies {
         @Internal get
 
     val dependencyHandler: ClocheDependencyHandler by lazy(LazyThreadSafetyMode.NONE) {
-        project.objects.newInstance<ClocheDependencyHandler>(target.minecraftVersion)
+        project.objects.newInstance<ClocheDependencyHandler>(target.minecraftVersion, project)
     }
 
     @Suppress("UNCHECKED_CAST")

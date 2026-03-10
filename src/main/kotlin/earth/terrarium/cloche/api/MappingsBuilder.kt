@@ -185,7 +185,7 @@ class MappingsBuilder internal constructor(
         project.dependencies.addProvider(
             configurationName,
             target.minecraftVersion.map {
-                "net.neoforged:neoform:$it-$timestamp@zip"
+                "net.neoforged:neoform:$it-$timestamp"
             }
         )
     }

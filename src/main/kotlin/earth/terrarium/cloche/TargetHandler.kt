@@ -136,6 +136,10 @@ private fun TargetCompilation<*>.addDependencies() {
         extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.localRuntimeConfigurationName))
     }
+
+    project.configurations.named(remapClasspathConfiguration.name) {
+        addCollectedDependencies(dependencyHandler.remapClasspath)
+    }
 }
 
 context(Project)

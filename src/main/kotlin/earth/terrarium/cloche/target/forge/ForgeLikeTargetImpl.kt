@@ -4,12 +4,9 @@ import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
-import earth.terrarium.cloche.target.CompilationInternal
-import earth.terrarium.cloche.target.LazyConfigurableInternal
-import earth.terrarium.cloche.target.MinecraftTargetInternal
-import earth.terrarium.cloche.target.lazyConfigurable
-import earth.terrarium.cloche.target.localImplementationConfigurationName
+import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
+import earth.terrarium.cloche.util.createLoaderDependency
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
@@ -220,16 +217,19 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             start.set(version)
         }
 
-    protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
+    protected fun forgeDependency(
+        group: String = this.group,
+        artifact: String = this.artifact,
+        configure: ExternalModuleDependency.() -> Unit
+    ): Provider<ExternalModuleDependency> =
         minecraftVersion.flatMap { minecraftVersion ->
             loaderVersion.map { forgeVersion ->
-                dependencyFactory.create(group, artifact, null).apply {
-                    version {
-                        strictly(version(minecraftVersion, forgeVersion))
-                    }
-
-                    configure()
-                }
+                dependencyFactory.createLoaderDependency(
+                    group,
+                    artifact,
+                    version(minecraftVersion, forgeVersion),
+                    configure
+                )
             }
         }
 

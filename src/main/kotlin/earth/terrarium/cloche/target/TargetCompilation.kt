@@ -24,7 +24,7 @@ import org.gradle.api.artifacts.DependencyScopeConfiguration
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
-import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.attributes.*
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
@@ -212,11 +212,8 @@ private fun setupModTransformationPipeline(
                 compilation.baseAttributes(to)
 
                 parameters {
-                    val compileClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
-
-                    val runtimeClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+                    val remapClasspath =
+                        project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name)
 
                     val modCompileClasspath =
                         project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
@@ -228,9 +225,7 @@ private fun setupModTransformationPipeline(
 
                     sourceNamespace.set(namespace)
 
-                    extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
-                    extraClasspath.from(compileClasspath)
-                    extraClasspath.from(runtimeClasspath)
+                    extraClasspath.from(remapClasspath)
 
                     cacheDirectory.set(getGlobalCacheDirectory(project))
 
@@ -313,6 +308,24 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 .attribute(CompilationAttributes.DATA, _info.data)
 
             isTransitive = false
+        }
+
+    val remapClasspathConfiguration: Configuration =
+        project.configurations.create(lowerCamelCaseGradleName(_info.target.featureName, featureName, "remapClasspath")) {
+            isCanBeConsumed = false
+            extendsFrom(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
+            extendsFrom(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
+
+            shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
+
+            attributes {
+                attribute(Usage.USAGE_ATTRIBUTE, project.objects.named(Usage::class.java, Usage.JAVA_API))
+                attribute(Category.CATEGORY_ATTRIBUTE, project.objects.named(Category::class.java, Category.LIBRARY))
+                attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, project.objects.named(LibraryElements::class.java, LibraryElements.JAR))
+                attribute(Bundling.BUNDLING_ATTRIBUTE, project.objects.named(Bundling::class.java, Bundling.EXTERNAL))
+            }
+
+            this@TargetCompilation.attributes(attributes)
         }
 
     val remapJarTask: TaskProvider<RemapJar>? = if (!_info.test) {
