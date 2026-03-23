@@ -7,6 +7,8 @@ import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.attributes.TargetAttributes
+import earth.terrarium.cloche.target.MOD_ID_CATEGORY
+import earth.terrarium.cloche.target.applyTargets
 import earth.terrarium.cloche.tasks.WriteModId
 import net.msrandom.classextensions.ClassExtensionsPlugin
 import net.msrandom.minecraftcodev.accesswidener.MinecraftCodevAccessWidenerPlugin

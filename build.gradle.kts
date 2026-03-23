@@ -22,10 +22,11 @@ gradlePlugin {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
 
     maven(url = "https://maven.fabricmc.net/")
-    maven(url = "https://maven.neoforged.net/")
+    maven(url = "https://maven.neoforged.net/releases")
     maven(url = "https://maven.msrandom.net/repository/cloche/")
     maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/")
 

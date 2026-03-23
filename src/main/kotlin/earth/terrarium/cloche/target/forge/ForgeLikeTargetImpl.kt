@@ -4,14 +4,19 @@ import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
+import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.*
+import earth.terrarium.cloche.target.compilation.CompilationInternal
+import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
 import earth.terrarium.cloche.util.createLoaderDependency
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.operatingSystemName
+import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.patchesConfigurationName
 import net.msrandom.minecraftcodev.forge.task.GenerateAccessTransformer
+import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
 import net.msrandom.minecraftcodev.forge.task.ResolvePatchedMinecraft
 import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
 import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
@@ -26,6 +31,7 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.kotlin.dsl.invoke
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.register
@@ -65,6 +71,17 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }))
     }
 
+    internal val generateClientExtra = project.tasks.register<GenerateForgeClientExtra>(
+        lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
+    ) {
+        group = "minecraft-resolution"
+
+        minecraftVersion.set(this@ForgeLikeTargetImpl.minecraftVersion)
+
+        outputFile.set(output(providerFactory.provider { "client-extra" }))
+        neoforge.set(this@ForgeLikeTargetImpl is NeoforgeTarget)
+    }
+
     override val finalJar
         get() = main.includeJarTask!!
 
@@ -93,10 +110,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     }
 
     private val clientExtra = project.files(minecraftVersion.map {
-        if (ClochePlugin.isUnobfuscated(it)) {
+        if (isUnobfuscatedVersion(it)) {
             emptyList()
         } else {
-            listOf(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::clientExtra))
+            listOf(generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
         }
     })
 
@@ -183,10 +200,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             extendsFrom(minecraftLibrariesConfiguration)
         }
 
-        project.dependencies.add(
-            sourceSet.runtimeOnlyConfigurationName,
-            clientExtra,
-        )
+        main.dependencyHandler.runtimeOnly(clientExtra)
 
         val userdev = forgeDependency {
             capabilities {
