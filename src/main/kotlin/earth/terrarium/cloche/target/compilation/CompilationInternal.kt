@@ -13,9 +13,8 @@ import earth.terrarium.cloche.api.target.targetName
 import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.ClocheTargetInternal
 import earth.terrarium.cloche.target.MinecraftTargetInternal
-import earth.terrarium.cloche.util.withIdeaModel
 import earth.terrarium.cloche.util.optionalDir
-import earth.terrarium.cloche.withIdeaModel
+import earth.terrarium.cloche.util.withIdeaModel
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import org.gradle.api.Action
 import org.gradle.api.Buildable
@@ -80,7 +79,7 @@ internal abstract class CompilationInternal : Compilation, Dependencies {
         @Internal get
 
     val dependencyHandler: ClocheDependencyHandler by lazy(LazyThreadSafetyMode.NONE) {
-        project.objects.newInstance<ClocheDependencyHandler>(target.minecraftVersion, project)
+        project.objects.newInstance<ClocheDependencyHandler>(target.minecraftVersion)
     }
 
     @Suppress("UNCHECKED_CAST")

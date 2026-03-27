@@ -7,6 +7,7 @@ import earth.terrarium.cloche.api.target.MinecraftTarget
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
+import earth.terrarium.cloche.util.maybeRegister
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.remapper.task.RemapTask
 import org.gradle.api.Project

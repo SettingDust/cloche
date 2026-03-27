@@ -1,12 +1,11 @@
 package earth.terrarium.cloche.target.compilation
 
-import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
-import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
+import earth.terrarium.cloche.*
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
-import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.ClocheTarget
-import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.util.fromJars
@@ -29,7 +28,7 @@ import org.gradle.api.artifacts.DependencyScopeConfiguration
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
-import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.attributes.*
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
@@ -40,7 +39,6 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.internal.extensions.core.serviceOf
-import org.gradle.kotlin.dsl.getByName
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
@@ -225,6 +223,12 @@ private fun setupModTransformationPipeline(
                 compilation.baseAttributes(to)
 
                 parameters {
+                    val compileClasspath =
+                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
+
+                    val runtimeClasspath =
+                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+
                     val remapClasspath =
                         project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name)
 
@@ -244,7 +248,10 @@ private fun setupModTransformationPipeline(
 
                     sourceNamespace.set(namespace)
 
+                    extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
                     extraClasspath.from(remapClasspath)
+                    extraClasspath.from(compileClasspath)
+                    extraClasspath.from(runtimeClasspath)
 
                     cacheDirectory.set(getGlobalCacheDirectory(project))
 
@@ -273,7 +280,8 @@ internal open class TargetCompilationInfo<T : MinecraftTargetInternal>(
 )
 
 @Suppress("UnstableApiUsage")
-internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject constructor(info: TargetCompilationInfo<T>) : CompilationInternal() {
+internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject constructor(info: TargetCompilationInfo<T>) :
+    CompilationInternal() {
     private val _info = info
 
     open val info
@@ -297,16 +305,25 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val metadataDirectory: Provider<Directory>
         @Internal
-        get() = project.layout.buildDirectory.dir("generated").map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
+        get() = project.layout.buildDirectory.dir("generated")
+            .map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
 
-    val finalMinecraftFile get() =
-        setupFiles.libraryArtifact
+    val finalMinecraftFile
+        get() =
+            setupFiles.libraryArtifact
 
-    val sources get() =
-        setupFiles.sourcesArtifact
+    val sources
+        get() =
+            setupFiles.sourcesArtifact
 
     val includeBucketConfiguration: NamedDomainObjectProvider<DependencyScopeConfiguration> =
-        project.configurations.dependencyScope(lowerCamelCaseGradleName(_info.target.featureName, featureName, "include")) {
+        project.configurations.dependencyScope(
+            lowerCamelCaseGradleName(
+                _info.target.featureName,
+                featureName,
+                "include"
+            )
+        ) {
             addCollectedDependencies(dependencyHandler.include)
         }
 
@@ -332,17 +349,24 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         }
 
     val remapClasspathConfiguration: Configuration =
-        project.configurations.create(lowerCamelCaseGradleName(_info.target.featureName, featureName, "remapClasspath")) {
+        project.configurations.create(
+            lowerCamelCaseGradleName(
+                _info.target.featureName,
+                featureName,
+                "remapClasspath"
+            )
+        ) {
             isCanBeConsumed = false
-            extendsFrom(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
-            extendsFrom(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
             shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
 
             attributes {
                 attribute(Usage.USAGE_ATTRIBUTE, project.objects.named(Usage::class.java, Usage.JAVA_API))
                 attribute(Category.CATEGORY_ATTRIBUTE, project.objects.named(Category::class.java, Category.LIBRARY))
-                attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, project.objects.named(LibraryElements::class.java, LibraryElements.JAR))
+                attribute(
+                    LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+                    project.objects.named(LibraryElements::class.java, LibraryElements.JAR)
+                )
                 attribute(Bundling.BUNDLING_ATTRIBUTE, project.objects.named(Bundling::class.java, Bundling.EXTERNAL))
             }
 
@@ -408,22 +432,34 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 )
             )
 
+        val remapClasspathDependencies = project.configurations.detachedConfiguration(
+            project.dependencies.create(project.files().builtBy(remapClasspathConfiguration))
+        )
+
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-            attributes.attributeProvider(REMAPPED_ATTRIBUTE, remapped)
+            attributes.attribute(REMAPPED_ATTRIBUTE, true)
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-            extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)
+            extendsFrom(
+                target.mappingsBuildDependenciesHolder,
+                minecraftBuildDependenciesHolder,
+                remapClasspathDependencies
+            )
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-            attributes.attributeProvider(REMAPPED_ATTRIBUTE, remapped)
+            attributes.attribute(REMAPPED_ATTRIBUTE, true)
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-            extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)
+            extendsFrom(
+                target.mappingsBuildDependenciesHolder,
+                minecraftBuildDependenciesHolder,
+                remapClasspathDependencies
+            )
         }
 
         setupFiles.accessWidenTask.configure {
@@ -455,6 +491,8 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
     override fun resolvableAttributes(attributes: AttributeContainer) {
         super.resolvableAttributes(attributes)
 
-        attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+        attributes
+            .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
     }
 }
