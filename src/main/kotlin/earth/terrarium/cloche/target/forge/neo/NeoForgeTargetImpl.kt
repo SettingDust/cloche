@@ -2,8 +2,8 @@ package earth.terrarium.cloche.target.forge.neo
 
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.compilation.CompilationInternal
-import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
+import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
 import earth.terrarium.cloche.tasks.data.decodeFromStream
 import earth.terrarium.cloche.tasks.data.encodeToStream
 import earth.terrarium.cloche.tasks.data.toml
@@ -11,12 +11,7 @@ import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.zipFileSystem
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
-import net.peanuuutz.tomlkt.TomlArray
-import net.peanuuutz.tomlkt.TomlTable
-import net.peanuuutz.tomlkt.asTomlArray
-import net.peanuuutz.tomlkt.asTomlTable
-import net.peanuuutz.tomlkt.buildTomlArray
-import net.peanuuutz.tomlkt.buildTomlTable
+import net.peanuuutz.tomlkt.*
 import org.gradle.api.artifacts.Dependency
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
@@ -65,6 +60,10 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
                 NEOFORGE_OPERATING_SYSTEM_ATTRIBUTE,
                 operatingSystemName(),
             )
+        }
+
+        loadMappingsTask.configure {
+            namedSrg.set(true)
         }
 
         resolvePatchedMinecraft.configure {
