@@ -1,18 +1,22 @@
-package earth.terrarium.cloche.target
+package earth.terrarium.cloche.target.compilation
 
 import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
 import earth.terrarium.cloche.NoopAction
 import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.target.ClocheTarget
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.cloche
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.util.fromJars
 import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.accesswidener.AccessWiden
 import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
+import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.decompiler.task.Decompile
 import net.msrandom.minecraftcodev.includes.IncludesJar
@@ -38,18 +42,25 @@ import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.internal.extensions.core.serviceOf
+import org.gradle.kotlin.dsl.getByName
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
 import javax.inject.Inject
 
-private fun Project.getUnmappedModFiles(configurationName: String): FileCollection {
+private fun Project.getUnmappedModFiles(configurationName: String) =
+    filteredClasspathFiles(configurationName, resolvableModConfigurationName(configurationName))
+
+private fun Project.getNonModFiles(configurationName: String) =
+    filteredClasspathFiles(configurationName, resolvableNonModConfigurationName(configurationName))
+
+private fun Project.filteredClasspathFiles(configurationName: String, filterConfigurationName: String): FileCollection {
     val classpath = project.configurations.named(configurationName)
 
-    val modDependencies = project.configurations.named(modConfigurationName(configurationName))
+    val allowedDependencies = project.configurations.named(filterConfigurationName)
 
-    return project.files(classpath.zip(modDependencies) { classpath, modDependencies ->
-        val resolutionResult = modDependencies.incoming.resolutionResult
+    return project.files(classpath.zip(allowedDependencies) { classpath, dependencies ->
+        val resolutionResult = dependencies.incoming.resolutionResult
 
         val componentIdentifiers =
             resolutionResult.allComponents.map(ResolvedComponentResult::getId) - resolutionResult.root.id
@@ -62,7 +73,7 @@ private fun Project.getUnmappedModFiles(configurationName: String): FileCollecti
             attributes {
                 attribute(REMAPPED_ATTRIBUTE, false)
             }
-        }.files
+        }.artifacts.artifactFiles
     })
 }
 
@@ -78,7 +89,7 @@ private fun Project.getUnmappedClasspath(configurationName: String): FileCollect
             attributes {
                 attribute(REMAPPED_ATTRIBUTE, false)
             }
-        }.files
+        }.artifacts.artifactFiles
     })
 }
 
@@ -119,6 +130,8 @@ internal fun registerCompilationTransformations(
         inputFile.set(namedMinecraftFile)
         namespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
 
+        namedSource.set(target.minecraftVersion.map(::isUnobfuscatedVersion))
+
         with(project) {
             // TODO Export access wideners as a separate artifact
             accessWideners.from(getRelevantSyncArtifacts(sourceSet.compileClasspathConfigurationName))
@@ -146,16 +159,15 @@ internal fun registerCompilationTransformations(
     return FinalJarTasks(accessWidenTask, decompile)
 }
 
-internal fun compilationSourceSet(target: MinecraftTargetInternal, name: String): SourceSet {
-    val sourceSet =
-        target.project.extension<SourceSetContainer>().maybeCreate(sourceSetName(target, name))
+internal fun Project.compilationSourceSet(target: ClocheTarget, name: String): SourceSet {
+    val sourceSet = extension<SourceSetContainer>().maybeCreate(sourceSetName(target, name))
 
-    if (sourceSet.localRuntimeConfigurationName !in target.project.configurations.names) {
-        target.project.configurations.dependencyScope(sourceSet.localRuntimeConfigurationName)
+    if (sourceSet.localRuntimeConfigurationName !in configurations.names) {
+        configurations.dependencyScope(sourceSet.localRuntimeConfigurationName)
     }
 
-    if (sourceSet.localImplementationConfigurationName !in target.project.configurations.names) {
-        target.project.configurations.dependencyScope(sourceSet.localImplementationConfigurationName)
+    if (sourceSet.localImplementationConfigurationName !in configurations.names) {
+        configurations.dependencyScope(sourceSet.localImplementationConfigurationName)
     }
 
     return sourceSet
@@ -175,8 +187,13 @@ private fun setupModTransformationPipeline(
 
             if (namespace.isEmpty()) {
                 project.dependencies.registerTransform(NoopAction::class.java) {
-                    from.attribute(REMAPPED_ATTRIBUTE, false)
-                    to.attribute(REMAPPED_ATTRIBUTE, true)
+                    from
+                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        .attribute(REMAPPED_ATTRIBUTE, false)
+
+                    to
+                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        .attribute(REMAPPED_ATTRIBUTE, true)
 
                     compilation.baseAttributes(from)
                     compilation.baseAttributes(to)
@@ -195,22 +212,28 @@ private fun setupModTransformationPipeline(
                     .attribute(REMAPPED_ATTRIBUTE, true)
                     .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
 
-            // Is the usage of the base attributes correct here?
+            // TODO Is the usage of the base attributes correct here?
             compilation.baseAttributes(from)
             compilation.baseAttributes(to)
 
-                parameters {
-                    val compileClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
+            parameters {
+                val compileClasspath =
+                    project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
 
-                    val runtimeClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+                val runtimeClasspath =
+                    project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                    val modCompileClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                val nonModCompileClasspath =
+                    project.getNonModFiles(compilation.sourceSet.compileClasspathConfigurationName)
 
-                    val modRuntimeClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                val nonModRuntimeClasspath =
+                    project.getNonModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+
+                val modCompileClasspath =
+                    project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+
+                val modRuntimeClasspath =
+                    project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
 
                     mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
 
@@ -221,6 +244,9 @@ private fun setupModTransformationPipeline(
                     extraClasspath.from(runtimeClasspath)
 
                     cacheDirectory.set(getGlobalCacheDirectory(project))
+
+                    nonModFiles.from(nonModCompileClasspath)
+                    nonModFiles.from(nonModRuntimeClasspath)
 
                     modFiles.from(modCompileClasspath)
                     modFiles.from(modRuntimeClasspath)
@@ -254,7 +280,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     override val isTest get() = _info.test
 
-    final override val sourceSet: SourceSet = compilationSourceSet(_info.target, _info.name)
+    final override val sourceSet: SourceSet = project.compilationSourceSet(_info.target, _info.name)
 
     val modOutputs = project.files(sourceSet.output)
 
