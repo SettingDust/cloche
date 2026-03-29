@@ -4,7 +4,7 @@ import earth.terrarium.cloche.ClocheTargetAttribute
 import earth.terrarium.cloche.NO_NAME_MAPPING_ATTRIBUTE
 import earth.terrarium.cloche.api.target.ForgeTarget
 import earth.terrarium.cloche.api.target.compilation.Compilation
-import earth.terrarium.cloche.target.CompilationInternal
+import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
@@ -65,6 +65,10 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                 .attribute(NO_NAME_MAPPING_ATTRIBUTE, true)
                 .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
         }
+
+        resolvePatchedMinecraft.configure {
+            neoforge.set(false)
+        }
     }
 
     private fun removeNameMappingService(compilation: Compilation) {
@@ -81,6 +85,8 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
         "$minecraftVersion-$loaderVersion"
 
     override fun addJarInjects(compilation: CompilationInternal) {
+        val hasAccessTransformers = providerFactory.provider { !compilation.accessWideners.isEmpty }
+
         project.tasks.named<Jar>(compilation.sourceSet.jarTaskName) {
             manifest {
                 attributes["MixinConfigs"] = object {
@@ -88,21 +94,15 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
                         return compilation.mixins.joinToString(",", transform = File::getName)
                     }
                 }
-            }
 
-            // TODO This is fundamentally broken as we are trying to access the not-yet-generated Jar to check if it contains a specific file,
-            //  to change the manifest used to generate said Jar
-/*            doFirst {
-                this as Jar
-
-                val accessTransformerName = "accesstransformer.cfg"
-
-                zipFileSystem(archiveFile.get().asFile.toPath()).use {
-                    if (it.getPath("META-INF", accessTransformerName).exists()) {
-                        manifest.attributes["FMLAT"] = accessTransformerName
+                attributes["FMLAT"] = hasAccessTransformers.map {
+                    if (it) {
+                        "accesstransformer.cfg"
+                    } else {
+                        null
                     }
                 }
-            }*/
+            }
         }
     }
 }

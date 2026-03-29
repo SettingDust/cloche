@@ -5,6 +5,7 @@ import earth.terrarium.cloche.util.isIdeDetected
 import earth.terrarium.cloche.api.target.MinecraftTarget
 import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
 import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.handleTarget
 import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -34,7 +35,10 @@ internal fun Project.ideSyncHook() {
 
     val startParameter = project.gradle.startParameter
 
-    startParameter.setTaskNames(startParameter.taskNames + fullName)
+    val oldTaskRequests = startParameter.taskRequests
+
+    startParameter.setTaskNames(listOf(fullName))
+    startParameter.setTaskRequests(oldTaskRequests + startParameter.taskRequests)
 }
 
 fun Project.extend(
@@ -102,5 +106,8 @@ class ClochePlugin<T : PluginAware> : Plugin<T> {
 
         @JvmField
         val MINIMUM_GRADLE: GradleVersion = GradleVersion.version("9.0.0")
+
+        @JvmField
+        val VERSION: String? = ClochePlugin::class.java.`package`.implementationVersion
     }
 }

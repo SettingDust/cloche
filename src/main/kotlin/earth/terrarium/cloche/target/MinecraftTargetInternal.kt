@@ -10,8 +10,10 @@ import earth.terrarium.cloche.api.run.RunConfigurations
 import earth.terrarium.cloche.api.target.CommonTarget
 import earth.terrarium.cloche.api.target.MinecraftTarget
 import earth.terrarium.cloche.api.target.compilation.ClocheDependencyHandler
-import earth.terrarium.cloche.javaExecutableFor
 import earth.terrarium.cloche.loader
+import earth.terrarium.cloche.target.common.CommonTargetInternal
+import earth.terrarium.cloche.target.compilation.CompilationInternal
+import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
@@ -60,12 +62,20 @@ internal abstract class MinecraftTargetInternal(
             javaExecutable.set(project.javaExecutableFor(minecraftVersion, cacheParameters))
         }
 
-    val mappingsBuildDependenciesHolder: Configuration =
-        project.configurations.detachedConfiguration(
-            project.dependencies.create(
-                project.files().builtBy(loadMappingsTask)
-            )
-        )
+    val mappingsBuildDependenciesHolder: Configuration by lazy(LazyThreadSafetyMode.NONE) {
+        val loadMappings = project.dependencies.create(project.files().builtBy(loadMappingsTask))
+        val configuration = project.configurations.detachedConfiguration()
+
+        configuration.dependencies.addAllLater(minecraftRemapNamespace.map {
+            if (it.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(loadMappings)
+            }
+        })
+
+        configuration
+    }
 
     override val accessWideners get() = main.accessWideners
     override val mixins get() = main.mixins
@@ -153,13 +163,15 @@ internal abstract class MinecraftTargetInternal(
         }
 
         project.configurations.named(sourceSet.mappingsConfigurationName) {
-            dependencies.addAllLater(mappings.isConfigured.map {
+            val defaultDependencies = mappings.isConfigured.map {
                 if (it) {
                     emptyList()
                 } else {
                     listOf(project.dependencies.create(officialMappingsDependency(project, this@MinecraftTargetInternal)))
                 }
-            })
+            }
+
+            dependencies.addAllLater(defaultDependencies)
         }
     }
 

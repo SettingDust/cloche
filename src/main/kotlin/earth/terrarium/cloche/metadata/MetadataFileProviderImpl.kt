@@ -8,7 +8,6 @@ import earth.terrarium.cloche.tasks.data.encodeToStream
 import earth.terrarium.cloche.tasks.data.toml
 import groovy.json.JsonBuilder
 import groovy.json.JsonSlurper
-import groovy.lang.Closure
 import groovy.toml.TomlBuilder
 import groovy.toml.TomlSlurper
 import kotlinx.serialization.json.Json
@@ -53,23 +52,10 @@ private class MetadataFileProviderImpl<ElementT : Any>(
         action.execute(newObj)
     }
 
-    override fun withContents(closure: Closure<*>) = withContents {
-        val owner = this@MetadataFileProviderImpl
-
-        closure.rehydrate(this, owner, owner).call()
-    }
-
     override fun withElement(action: ElementT.() -> ElementT) {
         builder = null
         obj = null
         element = action(readElement())
-    }
-
-    override fun withElement(closure: Closure<ElementT>) = withElement {
-        val delegate = this@withElement
-        val owner = this@MetadataFileProviderImpl
-
-        closure.rehydrate(delegate, owner, owner).call()
     }
 }
 

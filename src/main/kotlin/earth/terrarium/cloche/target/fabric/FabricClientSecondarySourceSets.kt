@@ -3,7 +3,7 @@ package earth.terrarium.cloche.target.fabric
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.target.compilation.FabricSecondarySourceSets
 import earth.terrarium.cloche.target.LazyConfigurableInternal
-import earth.terrarium.cloche.target.TargetCompilation
+import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.lazyConfigurable
 import org.gradle.kotlin.dsl.newInstance
 import javax.inject.Inject
@@ -18,7 +18,6 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
                 info.namedMinecraftFile,
                 info.clientMinecraftFile,
                 info.finalCommonJar,
-                target.main.finalMinecraftFile,
                 data = true,
                 test = false,
                 client = project.provider { true },
@@ -43,7 +42,6 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
                 info.commonMinecraftFile,
                 info.clientMinecraftFile,
                 info.finalCommonJar,
-                target.main.finalMinecraftFile,
                 data = false,
                 test = true,
                 client = project.provider { true },
