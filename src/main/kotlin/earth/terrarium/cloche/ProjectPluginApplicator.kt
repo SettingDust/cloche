@@ -114,6 +114,7 @@ fun applyToProject(target: Project) {
         attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE)
         attribute(IncludeTransformationStateAttribute.ATTRIBUTE)
 
+        attribute(RemapNamespaceAttribute.ATTRIBUTE)
     }
 
     target.dependencies.artifactTypes {

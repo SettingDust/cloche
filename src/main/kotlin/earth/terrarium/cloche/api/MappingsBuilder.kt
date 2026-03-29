@@ -2,8 +2,8 @@ package earth.terrarium.cloche.api
 
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.util.maybeRegister
 import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.util.maybeRegister
 import net.msrandom.minecraftcodev.core.task.ResolveMinecraftMappings
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.fabric.MinecraftCodevFabricPlugin

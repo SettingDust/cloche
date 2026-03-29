@@ -1,9 +1,11 @@
 package earth.terrarium.cloche.target.compilation
 
-import earth.terrarium.cloche.*
+import earth.terrarium.cloche.ClocheTargetAttribute
+import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
+import earth.terrarium.cloche.NoopAction
+import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
-
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.ClocheTarget
@@ -225,33 +227,33 @@ private fun setupModTransformationPipeline(
     compilation: TargetCompilation<*>,
 ) {
     // afterEvaluate needed as the registration of a transform is dependent on a lazy provider
-    //  this can potentially be changed to a no-op transform, but that's far slower
     project.afterEvaluate {
-        var registeredNoop = false
         for (remapNamespace in target.mappings.remapNamespaces.get()) {
             val namespace =
-                remapNamespace?.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
+                remapNamespace.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
 
+            // When modRemapNamespace is empty, default deps don't need remapping.
+            // Register NoopAction to provide an exact match (namespace=INITIAL) so that
+            // default deps pass through, while cross-namespace deps (e.g., INTERMEDIARY)
+            // still get remapped via RemapAction.
             if (namespace.isEmpty()) {
-                if (!registeredNoop) {
-                    project.dependencies.registerTransform(NoopAction::class) {
-                        from
-                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                            .attribute(REMAPPED_ATTRIBUTE, false)
-                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                            .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+                project.dependencies.registerTransform(NoopAction::class) {
+                    from
+                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        .attribute(REMAPPED_ATTRIBUTE, false)
+                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                        .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                        to
-                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                            .attribute(REMAPPED_ATTRIBUTE, true)
-                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                            .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+                    to
+                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        .attribute(REMAPPED_ATTRIBUTE, true)
+                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                        .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                        compilation.baseAttributes(from)
-                        compilation.baseAttributes(to)
-                    }
-                    registeredNoop = true
+                    compilation.baseAttributes(from)
+                    compilation.baseAttributes(to)
                 }
+
                 continue
             }
 
@@ -488,7 +490,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         )
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-            attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            attributes.attributeProvider(
+                REMAPPED_ATTRIBUTE,
+                _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
@@ -501,7 +505,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-            attributes.attribute(REMAPPED_ATTRIBUTE, true)
+            attributes.attributeProvider(
+                REMAPPED_ATTRIBUTE,
+                _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
