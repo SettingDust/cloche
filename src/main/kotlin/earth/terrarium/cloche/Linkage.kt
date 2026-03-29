@@ -1,18 +1,32 @@
 package earth.terrarium.cloche
 
-import earth.terrarium.cloche.target.CommonCompilation
-import earth.terrarium.cloche.target.CompilationInternal
-import earth.terrarium.cloche.target.TargetCompilation
-import earth.terrarium.cloche.target.modConfigurationName
+import earth.terrarium.cloche.api.target.ClocheTarget
+import earth.terrarium.cloche.target.CLASSES_AND_RESOURCES_VARIANT_NAME
+import earth.terrarium.cloche.target.REMAPPED_VARIANT_NAME
+import earth.terrarium.cloche.target.compilation.CommonCompilation
+import earth.terrarium.cloche.target.common.CommonTargetInternal
+import earth.terrarium.cloche.target.common.commonBucketConfigurationName
+import earth.terrarium.cloche.target.compilation.CompilationInternal
+import earth.terrarium.cloche.target.compilation.TargetCompilation
+import earth.terrarium.cloche.target.compilation.externalApiConfigurationName
+import earth.terrarium.cloche.target.compilation.externalCompileConfigurationName
+import earth.terrarium.cloche.target.compilation.externalRuntimeConfigurationName
+import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
+import earth.terrarium.cloche.target.compilation.localRuntimeConfigurationName
+import earth.terrarium.cloche.target.compilation.modConfigurationName
+import earth.terrarium.cloche.util.isIdeaDetected
 import net.msrandom.minecraftcodev.core.utils.extension
-import net.msrandom.minecraftcodev.mixins.mixinsConfigurationName
 import net.msrandom.virtualsourcesets.SourceSetStaticLinkageInfo
 import org.gradle.api.Project
+import org.gradle.api.artifacts.ConfigurationVariant
+import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.tasks.SourceSet
 
-const val JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR = "net.msrandom:java-expect-actual-processor:1.0.8"
-const val KOTLIN_MULTIPLATFORM_STUB_SYMBOL_PROCESSOR = "net.msrandom:kmp-actual-stubs-processor:1.0.3"
+const val JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR = "net.msrandom:java-expect-actual-processor:1.0.9"
+const val JAVA_CLASS_EXTENSIONS_ANNOTATIONS = "net.msrandom:class-extension-annotations:1.0.0"
+const val JAVA_CLASS_EXTENSIONS_PROCESSOR = "net.msrandom:java-class-extensions-processor:1.0.0"
+const val KOTLIN_MULTIPLATFORM_STUB_PLUGIN = "net.msrandom:kmp-actual-stubs-compiler-plugin:0.1.2"
 
 context(Project)
 private fun SourceSet.extendConfigurations(dependency: SourceSet, common: Boolean) {
@@ -40,6 +54,13 @@ private fun SourceSet.extendConfigurations(dependency: SourceSet, common: Boolea
 
     project.extend(runtimeOnlyConfigurationName, dependency.runtimeOnlyConfigurationName)
 
+    project.extend(localRuntimeConfigurationName, dependency.localRuntimeConfigurationName)
+    project.extend(localImplementationConfigurationName, dependency.localImplementationConfigurationName)
+
+    project.extend(externalRuntimeConfigurationName, dependency.externalRuntimeConfigurationName)
+    project.extend(externalCompileConfigurationName, dependency.externalCompileConfigurationName)
+    project.extend(externalApiConfigurationName, dependency.externalApiConfigurationName)
+
     project.extend(
         modConfigurationName(implementationConfigurationName),
         modConfigurationName(dependency.implementationConfigurationName),
@@ -65,7 +86,15 @@ private fun SourceSet.extendConfigurations(dependency: SourceSet, common: Boolea
         modConfigurationName(dependency.runtimeOnlyConfigurationName),
     )
 
-    project.extend(mixinsConfigurationName, dependency.mixinsConfigurationName)
+    project.extend(
+        modConfigurationName(localRuntimeConfigurationName),
+        modConfigurationName(dependency.localRuntimeConfigurationName),
+    )
+
+    project.extend(
+        modConfigurationName(localImplementationConfigurationName),
+        modConfigurationName(dependency.localImplementationConfigurationName),
+    )
 }
 
 /**
@@ -77,31 +106,148 @@ internal fun CommonCompilation.addClasspathDependency(dependency: CommonCompilat
 
     sourceSet.compileClasspath += dependency.sourceSet.output
 
-    artifacts {
-        it.add(sourceSet.apiElementsConfigurationName, tasks.named(dependency.sourceSet.jarTaskName))
+    if (!isTest && !dependency.isTest) {
+        artifacts {
+            add(sourceSet.apiElementsConfigurationName, tasks.named(dependency.sourceSet.jarTaskName))
+        }
     }
 
     sourceSet.extendConfigurations(dependency.sourceSet, true)
+
     accessWideners.from(dependency.accessWideners)
+    mixins.from(dependency.mixins)
+}
+
+context(Project)
+private fun TargetCompilation<*>.extendFromDependency(dependency: TargetCompilation<*>) {
+    if (!isTest && !dependency.isTest) {
+        artifacts {
+            add(sourceSet.apiElementsConfigurationName, dependency.includeJarTask!!)
+            add(sourceSet.runtimeElementsConfigurationName, dependency.includeJarTask)
+        }
+
+        for (name in listOf(
+            sourceSet.apiElementsConfigurationName,
+            sourceSet.runtimeElementsConfigurationName
+        )) {
+            configurations.named(name) {
+                outgoing.variants.named(REMAPPED_VARIANT_NAME) {
+                    artifact(tasks.named(dependency.sourceSet.jarTaskName))
+                }
+            }
+        }
+    }
+
+    includeBucketConfiguration.configure {
+        extendsFrom(dependency.includeBucketConfiguration.get())
+    }
+
+    if (isIdeaDetected()) {
+        val modelDependencies = project.configurations.detachedConfiguration()
+
+        fun addCompilation(compilation: CommonCompilation) {
+            modelDependencies.dependencies.add(project.dependencies.create(compilation.sourceSet.output.classesDirs))
+        }
+
+        fun addDependsOn(target: ClocheTarget) {
+            target.dependsOn.configureEach {
+                this as CommonTargetInternal
+
+                modelDependencies.dependencies.add(project.dependencies.create(main.sourceSet.output.classesDirs))
+
+                when (this@extendFromDependency.name) {
+                    SourceSet.TEST_SOURCE_SET_NAME -> {
+                        test.onConfigured(::addCompilation)
+                    }
+
+                    ClochePlugin.DATA_COMPILATION_NAME -> {
+                        data.onConfigured(::addCompilation)
+                    }
+
+                    ClochePlugin.CLIENT_COMPILATION_NAME -> {
+                        client.onConfigured(::addCompilation)
+                    }
+
+                    ClochePlugin.CLIENT_TEST_COMPILATION_NAME -> {
+                        test.onConfigured(::addCompilation)
+
+                        client.onConfigured {
+                            it.test.onConfigured(::addCompilation)
+                        }
+                    }
+
+                    ClochePlugin.CLIENT_DATA_COMPILATION_NAME -> {
+                        data.onConfigured(::addCompilation)
+
+                        client.onConfigured {
+                            it.data.onConfigured(::addCompilation)
+                        }
+                    }
+                }
+            }
+        }
+
+        addDependsOn(dependency.target)
+
+        sourceSet.compileClasspath += modelDependencies
+    }
+
+    sourceSet.extendConfigurations(dependency.sourceSet, false)
+
+    accessWideners.from(dependency.accessWideners)
+    mixins.from(dependency.mixins)
 }
 
 /**
  * Depend on the variant of [dependency]
  */
 context(Project)
-internal fun TargetCompilation.addClasspathDependency(dependency: TargetCompilation) {
+internal fun TargetCompilation<*>.addClasspathDependency(dependency: TargetCompilation<*>) {
     println("(classpath dependency) $this -> $dependency")
 
     sourceSet.compileClasspath += dependency.sourceSet.output
     sourceSet.runtimeClasspath += dependency.sourceSet.output
 
-    artifacts {
-        it.add(sourceSet.apiElementsConfigurationName, tasks.named(dependency.sourceSet.jarTaskName))
-        it.add(sourceSet.runtimeElementsConfigurationName, tasks.named(dependency.sourceSet.jarTaskName))
+    val dependencyVariant = configurations.named(dependency.sourceSet.runtimeElementsConfigurationName).flatMap {
+        it.outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME)
     }
 
-    sourceSet.extendConfigurations(dependency.sourceSet, false)
-    accessWideners.from(dependency.accessWideners)
+    configurations.named(sourceSet.runtimeElementsConfigurationName) {
+        outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME) {
+            artifacts.addAllLater(dependencyVariant.map(ConfigurationVariant::getArtifacts))
+        }
+    }
+
+    modOutputs.from(dependency.sourceSet.output)
+
+    extendFromDependency(dependency)
+}
+
+context(Project)
+internal fun TargetCompilation<*>.addDataClasspathDependency(dependency: TargetCompilation<*>) {
+    println("(classpath dependency) $this -> $dependency")
+
+    val configuration =
+        configurations.detachedConfiguration(dependencies.create(dependency.sourceSet.output.classesDirs))
+
+    sourceSet.compileClasspath += configuration
+    sourceSet.runtimeClasspath += configuration
+
+    sourceSet.resources.srcDir(dependency.sourceSet.resources)
+
+    val dependencyVariant = configurations.named(dependency.sourceSet.runtimeElementsConfigurationName).flatMap {
+        it.outgoing.variants.named(LibraryElements.CLASSES)
+    }
+
+    configurations.named(sourceSet.runtimeElementsConfigurationName) {
+        outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME) {
+            artifacts.addAllLater(dependencyVariant.map(ConfigurationVariant::getArtifacts))
+        }
+    }
+
+    modOutputs.from(dependency.sourceSet.output.classesDirs)
+
+    extendFromDependency(dependency)
 }
 
 /**
@@ -115,6 +261,10 @@ internal fun CompilationInternal.addSourceDependency(dependency: CommonCompilati
 
     sourceSet.extendConfigurations(dependency.sourceSet, true)
 
+    project.dependencies.add(sourceSet.compileOnlyConfigurationName, JAVA_CLASS_EXTENSIONS_ANNOTATIONS)
+    project.dependencies.add(sourceSet.annotationProcessorConfigurationName, JAVA_CLASS_EXTENSIONS_PROCESSOR)
     project.dependencies.add(sourceSet.annotationProcessorConfigurationName, JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR)
+
     accessWideners.from(dependency.accessWideners)
+    mixins.from(dependency.mixins)
 }

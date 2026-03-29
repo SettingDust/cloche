@@ -3,15 +3,24 @@ package earth.terrarium.cloche
 import earth.terrarium.cloche.ClochePlugin.Companion.IDE_SYNC_TASK_NAME
 import earth.terrarium.cloche.util.isIdeDetected
 import earth.terrarium.cloche.api.target.MinecraftTarget
+import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
 import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.handleTarget
+import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.initialization.Settings
 import org.gradle.api.plugins.PluginAware
+import org.gradle.api.tasks.SourceSet
+import org.gradle.util.GradleVersion
 
-fun Project.ideaSyncHook() {
-    tasks.register(IDE_SYNC_TASK_NAME)
+internal fun Project.requireGroup() {
+    if (group.toString().isEmpty()) {
+        throw InvalidUserCodeException("Group was not set for $project. Please set 'group' in either a gradle.properties file or a build script like build.gradle(.kts)")
+    }
+}
 
+internal fun Project.ideSyncHook() {
     if (!isIdeDetected()) {
         return
     }
@@ -26,7 +35,10 @@ fun Project.ideaSyncHook() {
 
     val startParameter = project.gradle.startParameter
 
-    startParameter.setTaskNames(startParameter.taskNames + fullName)
+    val oldTaskRequests = startParameter.taskRequests
+
+    startParameter.setTaskNames(listOf(fullName))
+    startParameter.setTaskRequests(oldTaskRequests + startParameter.taskRequests)
 }
 
 fun Project.extend(
@@ -40,21 +52,27 @@ internal fun addTarget(
     cloche: ClocheExtension,
     project: Project,
     target: MinecraftTarget,
-    singleTarget: Boolean,
 ) {
     target as MinecraftTargetInternal
 
     target.minecraftVersion.convention(cloche.minecraftVersion)
 
     cloche.mappingActions.all(target::mappings)
+    cloche.metadata.useAsConventionFor(target.metadata)
 
     with(project) {
-        handleTarget(target, singleTarget)
+        handleTarget(target)
     }
 }
 
 class ClochePlugin<T : PluginAware> : Plugin<T> {
     override fun apply(target: T) {
+        val currentGradle = GradleVersion.current()
+
+        if (currentGradle < MINIMUM_GRADLE) {
+            throw InvalidUserCodeException("Current Gradle version is ${currentGradle.version} while the minimum supported version is ${MINIMUM_GRADLE.version}")
+        }
+
         when (target) {
             is Project -> {
                 applyToProject(target)
@@ -66,12 +84,17 @@ class ClochePlugin<T : PluginAware> : Plugin<T> {
         }
     }
 
-    companion object {
+    internal companion object {
         const val SERVER_RUNNABLE_NAME = "server"
+
         const val CLIENT_COMPILATION_NAME = "client"
         const val DATA_COMPILATION_NAME = "data"
 
+        const val CLIENT_DATA_COMPILATION_NAME = CLIENT_COMPILATION_NAME + TARGET_NAME_PATH_SEPARATOR + DATA_COMPILATION_NAME
+        const val CLIENT_TEST_COMPILATION_NAME = CLIENT_COMPILATION_NAME + TARGET_NAME_PATH_SEPARATOR + SourceSet.TEST_SOURCE_SET_NAME
+
         const val IDE_SYNC_TASK_NAME = "clocheIdeSync"
+        const val WRITE_MOD_ID_TASK_NAME = "writeModId"
 
         const val STUB_GROUP = "net.msrandom"
         const val STUB_NAME = "stub"
@@ -80,5 +103,11 @@ class ClochePlugin<T : PluginAware> : Plugin<T> {
         const val STUB_DEPENDENCY = "$STUB_MODULE:$STUB_VERSION"
 
         const val KOTLIN_JVM_PLUGIN_ID = "org.jetbrains.kotlin.jvm"
+
+        @JvmField
+        val MINIMUM_GRADLE: GradleVersion = GradleVersion.version("9.0.0")
+
+        @JvmField
+        val VERSION: String? = ClochePlugin::class.java.`package`.implementationVersion
     }
 }

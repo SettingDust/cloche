@@ -1,12 +1,15 @@
 package earth.terrarium.cloche.target.forge
 
-import earth.terrarium.cloche.ClocheExtension
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.LazyConfigurable
 import earth.terrarium.cloche.api.run.RunConfigurations
+import earth.terrarium.cloche.api.run.quotedDescription
+import earth.terrarium.cloche.api.run.withCompilation
+import earth.terrarium.cloche.api.target.ForgeTarget
 import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
-import earth.terrarium.cloche.api.target.compilation.Compilation
-import earth.terrarium.cloche.ideaModule
+import earth.terrarium.cloche.api.target.targetName
+import earth.terrarium.cloche.util.withIdeaModule
+import earth.terrarium.cloche.modId
 import earth.terrarium.cloche.target.LazyConfigurableInternal
 import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.target.modOutputs
@@ -23,108 +26,108 @@ import net.msrandom.minecraftcodev.runs.task.ExtractNatives
 import org.gradle.api.Action
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.SourceSet
+import org.gradle.kotlin.dsl.named
 import org.gradle.language.jvm.tasks.ProcessResources
 import javax.inject.Inject
 
 internal abstract class ForgeRunConfigurations<T : ForgeLikeTargetImpl> @Inject constructor(val target: T) : RunConfigurations {
     fun create(vararg names: String, action: Action<ForgeRunsDefaultsContainer>): MinecraftRunConfiguration {
-        val run = project.extension<RunsContainer>().create(listOf(target.name, *names).joinToString(TARGET_NAME_PATH_SEPARATOR.toString()))
+        val run = project.extension<RunsContainer>().create(listOfNotNull(target.targetName, *names).joinToString(TARGET_NAME_PATH_SEPARATOR.toString()))
 
         applyDefault(run)
         run.defaults {
-            action.execute(it.extension<ForgeRunsDefaultsContainer>())
+            action.execute(extension<ForgeRunsDefaultsContainer>())
         }
 
         return run
     }
 
     protected open fun applyDefault(run: MinecraftRunConfiguration) {}
-    protected open fun configureData(data: ForgeRunConfigurationData, sourceSet: SourceSet) {}
-    protected open fun configureData(data: ForgeRunConfigurationData, sourceSet: Provider<SourceSet>) {}
+    protected open fun configureData(data: ForgeRunConfigurationData, compilation: ForgeCompilationImpl) {}
+    protected open fun configureData(data: ForgeRunConfigurationData, compilation: Provider<ForgeCompilationImpl>) {}
 
-    private fun ForgeRunConfigurationData.configure(sourceSet: SourceSet) {
+    private fun ForgeRunConfigurationData.configure(sourceSet: ForgeCompilationImpl) {
         configureData(this, sourceSet)
     }
 
-    private fun ForgeRunConfigurationData.configure(sourceSet: Provider<SourceSet>) {
+    private fun ForgeRunConfigurationData.configure(sourceSet: Provider<ForgeCompilationImpl>) {
         configureData(this, sourceSet)
     }
 
     override val server = project.lazyConfigurable {
         create(ClochePlugin.SERVER_RUNNABLE_NAME) {
-            it.server {
-                it.modOutputs.from(project.modOutputs(target.main))
+            server {
+                modOutputs.set(project.modOutputs(target.main))
 
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
-                it.writeLegacyClasspathTask.set(target.writeLegacyClasspath)
+                minecraftVersion.set(target.minecraftVersion)
+                patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
+                writeLegacyClasspathTask.set(target.main.writeLegacyClasspath)
 
-                it.configure(target.sourceSet)
+                configure(target.main)
             }
-        }
-            .sourceSet(target.sourceSet)
+        }.withCompilation(target.main)
     }
 
     override val client = project.lazyConfigurable {
         create(ClochePlugin.CLIENT_COMPILATION_NAME) {
-            it.client {
-                it.modOutputs.from(project.modOutputs(target.main))
+            client {
+                modOutputs.set(project.modOutputs(target.main))
 
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
-                it.extractNativesTask.set(project.tasks.named(target.sourceSet.extractNativesTaskName, ExtractNatives::class.java))
-                it.downloadAssetsTask.set(project.tasks.named(target.sourceSet.downloadAssetsTaskName, DownloadAssets::class.java))
-                it.writeLegacyClasspathTask.set(target.writeLegacyClasspath)
+                minecraftVersion.set(target.minecraftVersion)
+                patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
+                extractNativesTask.set(project.tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName))
+                downloadAssetsTask.set(project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName))
+                writeLegacyClasspathTask.set(target.main.writeLegacyClasspath)
 
-                it.configure(target.sourceSet)
+                configure(target.main)
             }
-        }
-            .sourceSet(target.sourceSet)
+        }.withCompilation(target.main)
     }
 
     override val data = project.lazyConfigurable {
+        val compilation = target.data.value
+
         val data = create(ClochePlugin.DATA_COMPILATION_NAME) {
-            it.data {
-                it.modOutputs.from(project.modOutputs(target.data.value))
+            data {
+                modOutputs.set(project.modOutputs(compilation))
 
-                it.modId.set(project.extension<ClocheExtension>().metadata.modId)
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
-                it.mainResources.set(target.sourceSet.output.resourcesDir)
-                it.outputDirectory.set(target.datagenDirectory)
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                modId.set(project.modId)
+                minecraftVersion.set(target.minecraftVersion)
+                patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
+                mainResources.set(target.sourceSet.output.resourcesDir)
+                outputDirectory.set(target.datagenDirectory)
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
-                it.writeLegacyClasspathTask.set(target.writeLegacyDataClasspath)
+                writeLegacyClasspathTask.set(compilation.flatMap(ForgeCompilationImpl::writeLegacyClasspath))
 
-                it.configure(target.data.value.map { it.sourceSet })
+                configure(compilation)
             }
-        }
-            .sourceSet(target.data.value.map(Compilation::sourceSet))
+        }.withCompilation(target, compilation) { quotedDescription(ForgeTarget::data.name) }
 
-        project.tasks.named(target.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-            it.from(target.datagenDirectory)
+        project.tasks.named<ProcessResources>(target.sourceSet.processResourcesTaskName) {
+            from(target.datagenDirectory)
+            mustRunAfter(data.runTask)
+        }
+
+        project.tasks.named(target.sourceSet.jarTaskName) {
+            dependsOn(data.runTask)
         }
 
         target.test.onConfigured {
-            project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                it.from(target.datagenDirectory)
+            project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                from(target.datagenDirectory)
+                mustRunAfter(data.runTask)
             }
         }
 
-        // afterEvaluate needed because idea APIs are not lazy
-        project.afterEvaluate {
-            project.ideaModule(target.sourceSet) {
-                it.resourceDirs.add(target.datagenDirectory.get().asFile)
-            }
+        project.withIdeaModule(target.sourceSet) {
+            it.resourceDirs.add(target.datagenDirectory.get().asFile)
+        }
 
-            target.test.onConfigured {
-                project.ideaModule(it.sourceSet) {
-                    it.resourceDirs.add(target.datagenDirectory.get().asFile)
-                }
+        target.test.onConfigured {
+            project.withIdeaModule(it.sourceSet) {
+                it.resourceDirs.add(target.datagenDirectory.get().asFile)
             }
         }
 
@@ -148,50 +151,51 @@ internal abstract class ForgeRunConfigurations<T : ForgeLikeTargetImpl> @Inject 
     }
 
     override val clientData: LazyConfigurable<MinecraftRunConfiguration> = project.lazyConfigurable {
+        val compilation = target.data.value
+
         val clientData = create(ClochePlugin.CLIENT_COMPILATION_NAME, ClochePlugin.DATA_COMPILATION_NAME) {
-            it.clientData {
-                it.modOutputs.from(project.modOutputs(target.data.value))
+            clientData {
+                modOutputs.set(project.modOutputs(compilation))
 
-                it.modId.set(project.extension<ClocheExtension>().metadata.modId)
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
-                it.outputDirectory.set(target.datagenClientDirectory)
-                it.commonOutputDirectory.set(target.datagenDirectory)
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                modId.set(project.modId)
+                minecraftVersion.set(target.minecraftVersion)
+                patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
+                outputDirectory.set(target.datagenClientDirectory)
+                commonOutputDirectory.set(target.datagenDirectory)
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
-                it.writeLegacyClasspathTask.set(target.writeLegacyDataClasspath)
+                writeLegacyClasspathTask.set(compilation.flatMap(ForgeCompilationImpl::writeLegacyClasspath))
 
-                it.mainResources.set(target.sourceSet.output.resourcesDir)
+                mainResources.set(target.sourceSet.output.resourcesDir)
 
-                it.configure(target.data.value.map { it.sourceSet })
+                configure(compilation)
             }
-        }
-            .sourceSet(target.data.value.map(Compilation::sourceSet))
+        }.withCompilation(target, compilation) { quotedDescription(ForgeTarget::data.name) }
 
-        project.tasks.named(target.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-            it.from(target.datagenClientDirectory)
+        project.tasks.named<ProcessResources>(target.sourceSet.processResourcesTaskName) {
+            from(target.datagenClientDirectory)
+            mustRunAfter(clientData.runTask)
+        }
+
+        project.tasks.named(target.sourceSet.jarTaskName) {
+            dependsOn(clientData.runTask)
         }
 
         target.test.onConfigured {
-            project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                it.from(target.datagenClientDirectory)
+            project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                from(target.datagenClientDirectory)
+                mustRunAfter(clientData.runTask)
             }
         }
 
-        // afterEvaluate needed because idea APIs are not lazy
-        project.afterEvaluate {
-            project.ideaModule(target.sourceSet) {
-                it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-            }
+        project.withIdeaModule(target.sourceSet) {
+            it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
+        }
 
-            target.test.onConfigured {
-                project.ideaModule(it.sourceSet) {
-                    it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-                }
+        target.test.onConfigured {
+            project.withIdeaModule(it.sourceSet) {
+                it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
             }
         }
 
@@ -219,18 +223,19 @@ internal abstract class ForgeRunConfigurations<T : ForgeLikeTargetImpl> @Inject 
     }
 
     override val test = project.lazyConfigurable {
+        val compilation = target.test.value
+
         create(SourceSet.TEST_SOURCE_SET_NAME) {
-            it.gameTestServer {
-                it.modOutputs.from(project.modOutputs(target.test.value))
+            gameTestServer {
+                modOutputs.set(project.modOutputs(compilation))
 
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
-                it.writeLegacyClasspathTask.set(target.writeLegacyTestClasspath)
+                minecraftVersion.set(target.minecraftVersion)
+                patches.from(project.configurations.named(target.sourceSet.patchesConfigurationName))
+                writeLegacyClasspathTask.set(compilation.flatMap(ForgeCompilationImpl::writeLegacyClasspath))
 
-                it.configure(target.test.value.map { it.sourceSet })
+                configure(compilation)
             }
-        }
-            .sourceSet(target.test.value.map(Compilation::sourceSet))
+        }.withCompilation(target, compilation) { quotedDescription(ForgeTarget::test.name) }
     }
 
     override val clientTest: LazyConfigurableInternal<MinecraftRunConfiguration> = project.lazyConfigurable {

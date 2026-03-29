@@ -1,82 +1,137 @@
 package earth.terrarium.cloche
 
-import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.target.TargetCompilation
-import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseName
-import org.gradle.api.artifacts.CacheableRule
+import earth.terrarium.cloche.api.attributes.ModDistribution
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeCompatibilityRule
 import org.gradle.api.attributes.AttributeDisambiguationRule
 import org.gradle.api.attributes.CompatibilityCheckDetails
 import org.gradle.api.attributes.MultipleCandidatesDetails
 
+/**
+ * Indicates that the variant is fully remapped
+ */
 @JvmField
-val SIDE_ATTRIBUTE: Attribute<PublicationSide> = Attribute.of("earth.terrarium.cloche.side", PublicationSide::class.java)
+val REMAPPED_ATTRIBUTE: Attribute<Boolean> =
+    Attribute.of("earth.terrarium.cloche.remapped", Boolean::class.javaObjectType)
 
+/**
+ * Indicates that the variant has includes fully resolved/handled
+ */
 @JvmField
-val DATA_ATTRIBUTE: Attribute<Boolean> = Attribute.of("earth.terrarium.cloche.data", Boolean::class.javaObjectType)
+val INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE: Attribute<Boolean> =
+    Attribute.of("earth.terrarium.cloche.includeTransformedOutput", Boolean::class.javaObjectType)
 
+/**
+ * Indicates that the forge mapping service has been stripped
+ */
 @JvmField
-val NO_NAME_MAPPING_ATTRIBUTE: Attribute<Boolean> = Attribute.of("earth.terrarium.cloche.noNameMappingService", Boolean::class.javaObjectType)
+val NO_NAME_MAPPING_ATTRIBUTE: Attribute<Boolean> =
+    Attribute.of("earth.terrarium.cloche.noNameMappingService", Boolean::class.javaObjectType)
 
-// Edge target attributes
-object TargetAttributes {
-    @JvmField
-    val MINECRAFT_VERSION: Attribute<String> = Attribute.of("earth.terrarium.cloche.minecraftVersion", String::class.java)
+class ClocheVersion(val versionName: String) : Comparable<ClocheVersion> {
+    private val versionValue = run {
+        val parts = versionName.split('.')
 
-    @JvmField
-    val MOD_LOADER: Attribute<String> = Attribute.of("earth.terrarium.cloche.modLoader", String::class.java)
-}
-
-object CommonTargetAttributes {
-    @JvmField
-    val TYPE: Attribute<String> = Attribute.of("earth.terrarium.cloche.commonType", String::class.java)
-
-    @JvmField
-    val NAME: Attribute<String> = Attribute.of("earth.terrarium.cloche.commonName", String::class.java)
-}
-
-class SideCompatibilityRule : AttributeCompatibilityRule<PublicationSide> {
-    override fun execute(details: CompatibilityCheckDetails<PublicationSide>) {
-        if (details.producerValue == PublicationSide.Common || details.producerValue == PublicationSide.Joined) {
-            details.compatible()
-        } else {
-            details.incompatible()
+        require(parts.size == 3) {
+            "Expected version to contain three parts, but version $versionName contained ${parts.size}"
         }
+
+        val (major, minor, patch) = parts.map(String::toInt)
+
+        major * 1_000_000 + minor * 1_000 + patch
+    }
+
+    override fun compareTo(other: ClocheVersion) = versionValue.compareTo(other.versionValue)
+}
+
+class ClocheVersionCompatibilityRule : AttributeCompatibilityRule<String> {
+    override fun execute(details: CompatibilityCheckDetails<String>) {
+        details.compatible()
     }
 }
 
-class SideDisambiguationRule : AttributeDisambiguationRule<PublicationSide> {
-    override fun execute(details: MultipleCandidatesDetails<PublicationSide>) {
+class ClocheVersionDisambiguationRule : AttributeDisambiguationRule<String> {
+    override fun execute(details: MultipleCandidatesDetails<String>) {
+        val targetVersionName = details.consumerValue ?: ClochePlugin::class.java.`package`.implementationVersion
+
+        if (targetVersionName != null && targetVersionName in details.candidateValues) {
+            details.closestMatch(targetVersionName)
+            return
+        }
+
+        val versions = details.candidateValues.map(::ClocheVersion).sorted()
+
+        if (targetVersionName == null) {
+            // No known target version, pick latest
+            details.closestMatch(versions.last().versionName)
+            return
+        }
+
+        val targetVersion = ClocheVersion(targetVersionName)
+
+        val index = versions.binarySearch(targetVersion)
+        val insertionPoint = -index - 1
+
+        val closestVersion = if (insertionPoint == 0) {
+            // Version is smaller than any of the candidates, so pick the lowest version
+            versions.first()
+        } else {
+            // Pick the version directly before the target in the candidate list
+            versions[insertionPoint - 1]
+        }
+
+        details.closestMatch(closestVersion.versionName)
+    }
+}
+
+class DistributionCompatibilityRule : AttributeCompatibilityRule<ModDistribution> {
+    override fun execute(details: CompatibilityCheckDetails<ModDistribution>) {
+        details.compatible()
+    }
+}
+
+class DistributionDisambiguationRule : AttributeDisambiguationRule<ModDistribution> {
+    override fun execute(details: MultipleCandidatesDetails<ModDistribution>) {
         if (details.consumerValue in details.candidateValues) {
             // Pick the requested variant
             details.closestMatch(details.consumerValue!!)
-        } else if (details.consumerValue == PublicationSide.Client) {
-            // Prefer joined if the consumer is client
-            if (PublicationSide.Joined in details.candidateValues) {
-                details.closestMatch(PublicationSide.Joined)
-            } else if (PublicationSide.Common in details.candidateValues) {
-                details.closestMatch(PublicationSide.Common)
-            }
-        } else {
-            // Prefer common otherwise
-            if (PublicationSide.Common in details.candidateValues) {
-                details.closestMatch(PublicationSide.Common)
-            } else if (PublicationSide.Joined in details.candidateValues) {
-                details.closestMatch(PublicationSide.Joined)
-            }
+        } else if (details.consumerValue == ModDistribution.client && ModDistribution.common in details.candidateValues) {
+            details.closestMatch(ModDistribution.common)
         }
     }
 }
 
-internal object ModTransformationStateAttribute {
-    @JvmField
-    val ATTRIBUTE: Attribute<String> = Attribute.of("earth.terrarium.cloche.modState", String::class.java)
+@Deprecated("Stop-gap for migration to DISTRIBUTION attribute")
+class ClocheSideCompatibilityRule : AttributeCompatibilityRule<String> {
+    override fun execute(details: CompatibilityCheckDetails<String>) {
+        details.compatible()
+    }
+}
 
-    const val INITIAL = "none"
-    const val REMAPPED = "remapped"
-    const val MIXINS_STRIPPED = "mixinsStripped"
+@Deprecated("Stop-gap for migration to DISTRIBUTION attribute")
+class ClocheSideDisambiguationRule : AttributeDisambiguationRule<String> {
+    override fun execute(details: MultipleCandidatesDetails<String>) {
+        if (details.consumerValue in details.candidateValues) {
+            // Pick the requested variant
+            details.closestMatch(details.consumerValue!!)
+        } else if (details.consumerValue == ModDistribution.client.legacyName && ModDistribution.common.legacyName in details.candidateValues) {
+            details.closestMatch(ModDistribution.common.legacyName)
+        }
+    }
+}
 
-    fun of(target: MinecraftTarget, compilation: TargetCompilation, state: String) =
-        lowerCamelCaseName(target.featureName, compilation.featureName, state)
+class DataCompatibilityRule : AttributeCompatibilityRule<Boolean> {
+    override fun execute(details: CompatibilityCheckDetails<Boolean>) {
+        details.compatible()
+    }
+}
+
+class DataDisambiguationRule : AttributeDisambiguationRule<Boolean> {
+    override fun execute(details: MultipleCandidatesDetails<Boolean>) {
+        if (details.consumerValue == true && true in details.candidateValues) {
+            details.closestMatch(true)
+        } else if (false in details.candidateValues) {
+            details.closestMatch(false)
+        }
+    }
 }

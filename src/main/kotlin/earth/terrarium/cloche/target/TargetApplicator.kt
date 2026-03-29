@@ -1,10 +1,13 @@
-package earth.terrarium.cloche
+package earth.terrarium.cloche.target
 
-import earth.terrarium.cloche.target.CommonCompilation
-import earth.terrarium.cloche.target.CommonTargetInternal
-import earth.terrarium.cloche.target.CommonTopLevelCompilation
-import earth.terrarium.cloche.target.CompilationInternal
-import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.ClocheExtension
+import earth.terrarium.cloche.addSourceDependency
+import earth.terrarium.cloche.addTarget
+import earth.terrarium.cloche.target.compilation.CommonCompilation
+import earth.terrarium.cloche.target.common.CommonTargetInternal
+import earth.terrarium.cloche.target.compilation.CommonTopLevelCompilation
+import earth.terrarium.cloche.target.compilation.CompilationInternal
+import earth.terrarium.cloche.target.common.createCommonTarget
 import earth.terrarium.cloche.target.fabric.FabricClientSecondarySourceSets
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import net.msrandom.minecraftcodev.core.MinecraftDependenciesOperatingSystemMetadataRule
@@ -13,93 +16,103 @@ import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
 import net.msrandom.virtualsourcesets.SourceSetStaticLinkageInfo
 import org.gradle.api.Project
+import org.gradle.kotlin.dsl.all
+import org.gradle.kotlin.dsl.listProperty
 
 internal fun applyTargets(project: Project, cloche: ClocheExtension) {
-    cloche.targets.all { target ->
+    cloche.targets.all {
+        val target = this
+
         target as MinecraftTargetInternal
 
-        target.initialize(false)
+        addTarget(cloche, project, target)
 
-        addTarget(cloche, project, target, false)
+        target.dependsOn.all {
+            val dependency = this
 
-        target.dependsOn.all { dependency ->
             dependency as CommonTargetInternal
 
-            fun setDependenciesWithClient(targetClient: FabricClientSecondarySourceSets, common: CommonTargetInternal): CommonTopLevelCompilation {
+            fun CommonTargetInternal.setDependenciesWithClient(targetClient: FabricClientSecondarySourceSets): CommonTopLevelCompilation {
                 targetClient.data.onConfigured {
-                    common.data.configure()
+                    data.configure()
                 }
 
                 targetClient.test.onConfigured {
-                    common.test.configure()
+                    test.configure()
                 }
 
-                common.dependsOn.all {
-                    setDependenciesWithClient(targetClient, it as CommonTargetInternal)
+                dependsOn.all {
+                    this as CommonTargetInternal
+
+                    setDependenciesWithClient(targetClient)
                 }
 
-                return common.client()
+                return client()
             }
 
-            fun setDependenciesWithData(common: CommonTargetInternal): CommonCompilation {
-                common.dependsOn.all {
-                    setDependenciesWithData(it as CommonTargetInternal)
+            fun CommonTargetInternal.setDependenciesWithData(): CommonCompilation {
+                dependsOn.all {
+                    this as CommonTargetInternal
+
+                    setDependenciesWithData()
                 }
 
-                return common.data()
+                return data()
             }
 
-            fun setDependenciesWithTest(common: CommonTargetInternal): CommonCompilation {
-                common.dependsOn.all {
-                    setDependenciesWithTest(it as CommonTargetInternal)
+            fun CommonTargetInternal.setDependenciesWithTest(): CommonCompilation {
+                dependsOn.all {
+                    this as CommonTargetInternal
+
+                    setDependenciesWithTest()
                 }
 
-                return common.data()
+                return test()
             }
 
-            fun addIncludedClientWeakLinks(info: SourceSetStaticLinkageInfo, common: CommonTargetInternal) {
-                common.client.onConfigured {
+            fun CommonTargetInternal.addIncludedClientWeakLinks(info: SourceSetStaticLinkageInfo) {
+                client.onConfigured {
                     it.data.onConfigured { data ->
-                        common.data.onConfigured { commonData ->
+                        this.data.onConfigured { commonData ->
                             println("(source dependency) ($target only) $data -> $commonData")
                             info.weakTreeLink(data.sourceSet, commonData.sourceSet)
                         }
                     }
 
                     it.test.onConfigured { test ->
-                        common.test.onConfigured { commonTest ->
+                        this.test.onConfigured { commonTest ->
                             println("(source dependency) ($target only) $test -> $commonTest")
                             info.weakTreeLink(test.sourceSet, commonTest.sourceSet)
                         }
                     }
 
-                    println("(source dependency) ($target only) $it -> ${common.main}")
-                    info.weakTreeLink(it.sourceSet, common.sourceSet)
+                    println("(source dependency) ($target only) $it -> $main")
+                    info.weakTreeLink(it.sourceSet, sourceSet)
                 }
 
-                common.dependsOn.all { dependency ->
-                    dependency as CommonTargetInternal
+                dependsOn.all {
+                    this as CommonTargetInternal
 
-                    addIncludedClientWeakLinks(info, dependency)
+                    addIncludedClientWeakLinks(info)
                 }
             }
 
             with(project) {
                 target.data.onConfigured { data ->
-                    val dependency = setDependenciesWithData(dependency)
+                    val dependency = dependency.setDependenciesWithData()
 
                     data.addSourceDependency(dependency)
                 }
 
                 target.test.onConfigured { test ->
-                    val dependency = setDependenciesWithData(dependency)
+                    val dependency = dependency.setDependenciesWithTest()
 
                     test.addSourceDependency(dependency)
                 }
 
                 if (target is FabricTargetImpl) {
                     target.client.onConfigured {
-                        val dependency = setDependenciesWithClient(it, dependency)
+                        val dependency = dependency.setDependenciesWithClient(it)
 
                         it.addSourceDependency(dependency)
 
@@ -134,16 +147,20 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
                         }
                     }
 
-                    addIncludedClientWeakLinks(staticLinkage, dependency)
+                    dependency.addIncludedClientWeakLinks(staticLinkage)
                 }
             }
         }
     }
 
-    cloche.commonTargets.all { commonTarget ->
+    cloche.commonTargets.all {
+        val commonTarget = this
+
         commonTarget as CommonTargetInternal
 
-        commonTarget.dependsOn.all { dependency ->
+        commonTarget.dependsOn.all {
+            val dependency = this
+
             dependency as CommonTargetInternal
 
             with(project) {
@@ -189,7 +206,7 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
             val objects = objects
 
             val onlyCommonOfType = commonTarget.commonType.flatMap { type ->
-                val types = objects.listProperty(String::class.java)
+                val types = objects.listProperty<String>()
 
                 for (target in cloche.commonTargets) {
                     types.add((target as CommonTargetInternal).commonType)
@@ -212,8 +229,8 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
             listOf(cloche.singleTargetConfigurator.target!!)
         }
 
-        project.dependencies.components.all(MinecraftDependenciesOperatingSystemMetadataRule::class.java) {
-            it.params(
+        project.dependencies.components.all<MinecraftDependenciesOperatingSystemMetadataRule> {
+            params(
                 getGlobalCacheDirectory(project),
                 targets.map { it.minecraftVersion.get() },
                 VERSION_MANIFEST_URL,

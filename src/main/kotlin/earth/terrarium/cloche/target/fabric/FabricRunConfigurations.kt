@@ -1,13 +1,18 @@
 package earth.terrarium.cloche.target.fabric
 
-import earth.terrarium.cloche.ClocheExtension
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.LazyConfigurable
 import earth.terrarium.cloche.api.run.RunConfigurations
+import earth.terrarium.cloche.api.run.commonDescription
+import earth.terrarium.cloche.api.run.quotedDescription
+import earth.terrarium.cloche.api.run.withCompilation
+import earth.terrarium.cloche.api.target.FabricTarget
 import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
-import earth.terrarium.cloche.api.target.compilation.Compilation
-import earth.terrarium.cloche.ideaModule
-import earth.terrarium.cloche.target.TargetCompilation
+import earth.terrarium.cloche.api.target.compilation.CommonSecondarySourceSets
+import earth.terrarium.cloche.api.target.targetName
+import earth.terrarium.cloche.util.withIdeaModule
+import earth.terrarium.cloche.modId
+import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.target.modOutputs
 import net.msrandom.minecraftcodev.core.utils.extension
@@ -20,93 +25,116 @@ import net.msrandom.minecraftcodev.runs.task.DownloadAssets
 import net.msrandom.minecraftcodev.runs.task.ExtractNatives
 import org.gradle.api.Action
 import org.gradle.api.tasks.SourceSet
+import org.gradle.kotlin.dsl.named
 import org.gradle.language.jvm.tasks.ProcessResources
 import javax.inject.Inject
 
 internal abstract class FabricRunConfigurations @Inject constructor(val target: FabricTargetImpl) : RunConfigurations {
-    fun create(vararg names: String, action: Action<FabricRunsDefaultsContainer>): MinecraftRunConfiguration {
-        val run = project.extension<RunsContainer>().create(listOf(target.name, *names).joinToString(TARGET_NAME_PATH_SEPARATOR.toString()))
+    fun create(name: String, action: Action<FabricRunsDefaultsContainer>): MinecraftRunConfiguration {
+        val run = project.extension<RunsContainer>()
+            .create(listOfNotNull(target.targetName, name).joinToString(TARGET_NAME_PATH_SEPARATOR.toString()))
 
         run.defaults {
-            action.execute(it.extension<FabricRunsDefaultsContainer>())
+            action.execute(extension<FabricRunsDefaultsContainer>())
         }
 
         return run
     }
 
+    private fun clientDescription(name: String) = if (target.client.isConfiguredValue) {
+        quotedDescription(name)
+    } else if (target.client.value.isPresent) {
+        "'${FabricTarget::client.name} { ${commonDescription(name)} }'"
+    } else {
+        "'${FabricTarget::client.name} { ${commonDescription(name)} }' or ${quotedDescription(name)}"
+    }
+
     override val server = project.lazyConfigurable {
         create(ClochePlugin.SERVER_RUNNABLE_NAME) {
-            it.server {
-                it.modOutputs.from(project.modOutputs(target.main))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+            server {
+                modOutputs.set(project.modOutputs(target.main))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+
+                gameJar.set(target.main.commonMinecraftFile)
+                writeGameLibrariesTask.set(target.writeCommonGameLibrariesTask)
             }
-        }
-            .sourceSet(target.sourceSet)
+        }.withCompilation(target.main)
     }
 
     override val client = project.lazyConfigurable {
-        create(ClochePlugin.CLIENT_COMPILATION_NAME) {
-            it.client {
-                it.modOutputs.from(project.modOutputs(target.client.value.map<TargetCompilation> { it }.orElse(target.main)))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+        val compilation = target.client.value.map<TargetCompilation<*>> { it }.orElse(target.main)
 
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.extractNativesTask.set(
-                    project.tasks.named(
-                        target.sourceSet.extractNativesTaskName,
-                        ExtractNatives::class.java
-                    )
+        create(ClochePlugin.CLIENT_COMPILATION_NAME) {
+            client {
+                modOutputs.set(project.modOutputs(compilation))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+
+                minecraftVersion.set(target.minecraftVersion)
+                extractNativesTask.set(
+                    project.tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName)
                 )
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
+
+                gameJar.set(target.main.commonMinecraftFile)
+
+                clientJar.set(target.client.value.flatMap { it.finalMinecraftFile }
+                    .orElse(target.main.clientMinecraftFile))
+
+                writeGameLibrariesTask.set(target.writeClientGameLibrariesTask)
             }
+        }.withCompilation(target, compilation) {
+            // TODO This error description is currently unused, as the fallback to target.main will *always* succeed
+            //  Whether this should be changed is still up for debate. Should a target with no configured client still be runnable as client?
+            //  it makes sense for server mods and datapacks to still be tested on the client, so the best option is probably removing the checking here and always allowing client runs
+            ""
         }
-            .sourceSet(target.client.value.map(Compilation::sourceSet).orElse(target.sourceSet))
     }
 
     override val data = project.lazyConfigurable {
+        val compilation = target.data.value
+
         val data = create(ClochePlugin.DATA_COMPILATION_NAME) {
-            it.data {
-                it.modOutputs.from(project.modOutputs(target.data.value))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+            data {
+                modOutputs.set(project.modOutputs(compilation))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
 
-                it.modId.set(project.extension<ClocheExtension>().metadata.modId)
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.outputDirectory.set(target.datagenDirectory)
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                modId.set(project.modId)
+                minecraftVersion.set(target.minecraftVersion)
+                outputDirectory.set(target.datagenDirectory)
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
-            }
-        }
-            .sourceSet(target.data.value.map(Compilation::sourceSet))
 
-        project.tasks.named(target.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-            it.from(target.datagenDirectory)
+                gameJar.set(compilation.flatMap { it.commonMinecraftFile })
+                writeGameLibrariesTask.set(target.writeCommonGameLibrariesTask)
+            }
+        }.withCompilation(target, compilation) { quotedDescription(CommonSecondarySourceSets::data.name) }
+
+        project.tasks.named<ProcessResources>(target.sourceSet.processResourcesTaskName) {
+            from(target.datagenDirectory)
+            mustRunAfter(data.runTask)
+        }
+
+        project.tasks.named(target.sourceSet.jarTaskName) {
+            dependsOn(data.runTask)
         }
 
         target.test.onConfigured {
-            project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                it.from(target.datagenDirectory)
+            project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                from(target.datagenDirectory)
+                mustRunAfter(data.runTask)
             }
         }
 
-        // afterEvaluate needed because idea APIs are not lazy
-        project.afterEvaluate {
-            project.ideaModule(target.sourceSet) {
-                it.resourceDirs.add(target.datagenDirectory.get().asFile)
-            }
+        project.withIdeaModule(target.sourceSet) {
+            it.resourceDirs.add(target.datagenDirectory.get().asFile)
+        }
 
-            target.test.onConfigured {
-                project.ideaModule(it.sourceSet) {
-                    it.resourceDirs.add(target.datagenDirectory.get().asFile)
-                }
+        target.test.onConfigured {
+            project.withIdeaModule(it.sourceSet) {
+                it.resourceDirs.add(target.datagenDirectory.get().asFile)
             }
         }
 
@@ -122,77 +150,85 @@ internal abstract class FabricRunConfigurations @Inject constructor(val target: 
     }
 
     override val clientData: LazyConfigurable<MinecraftRunConfiguration> = project.lazyConfigurable {
-        val clientData = create(ClochePlugin.CLIENT_COMPILATION_NAME, ClochePlugin.DATA_COMPILATION_NAME) {
-            it.clientData {
-                val compilation = target.client.value.flatMap { it.data.value }.orElse(target.data.value)
+        val compilation = target.client.value.flatMap { it.data.value }.orElse(target.data.value)
 
-                it.modOutputs.from(project.modOutputs(compilation))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+        val clientData = create(ClochePlugin.CLIENT_DATA_COMPILATION_NAME) {
+            clientData {
+                modOutputs.set(project.modOutputs(compilation))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
 
-                it.modId.set(project.extension<ClocheExtension>().metadata.modId)
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.outputDirectory.set(target.datagenClientDirectory)
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                modId.set(project.modId)
+                minecraftVersion.set(target.minecraftVersion)
+                outputDirectory.set(target.datagenClientDirectory)
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
+
+                gameJar.set(compilation.flatMap { it.commonMinecraftFile })
+                clientJar.set(compilation.flatMap { it.clientMinecraftFile })
+
+                writeGameLibrariesTask.set(target.writeClientGameLibrariesTask)
             }
-        }.sourceSet(
-            target.client.value.flatMap { it.data.value }.orElse(target.data.value).map(Compilation::sourceSet)
-        )
+        }.withCompilation(target, compilation) {
+            clientDescription(CommonSecondarySourceSets::data.name)
+        }
 
         target.client.onConfigured {
-            project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                it.from(target.datagenDirectory)
-                it.from(target.datagenClientDirectory)
+            project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                from(target.datagenDirectory)
+                from(target.datagenClientDirectory)
+                mustRunAfter(clientData.runTask)
+            }
+
+            project.tasks.named(it.sourceSet.jarTaskName) {
+                dependsOn(clientData.runTask)
             }
 
             it.test.onConfigured {
-                project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                    it.from(target.datagenDirectory)
-                    it.from(target.datagenClientDirectory)
+                project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                    from(target.datagenDirectory)
+                    from(target.datagenClientDirectory)
+                    mustRunAfter(clientData.runTask)
                 }
             }
 
-            // afterEvaluate needed because idea APIs are not lazy
-            project.afterEvaluate { _ ->
-                project.ideaModule(it.sourceSet) {
+            project.withIdeaModule(it.sourceSet) {
+                it.resourceDirs.add(target.datagenDirectory.get().asFile)
+                it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
+            }
+
+            it.test.onConfigured {
+                project.withIdeaModule(it.sourceSet) {
                     it.resourceDirs.add(target.datagenDirectory.get().asFile)
                     it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-                }
-
-                it.test.onConfigured {
-                    project.ideaModule(it.sourceSet) {
-                        it.resourceDirs.add(target.datagenDirectory.get().asFile)
-                        it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-                    }
                 }
             }
         }
 
         target.onClientIncluded {
-            project.tasks.named(target.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                it.from(target.datagenClientDirectory)
+            project.tasks.named<ProcessResources>(target.sourceSet.processResourcesTaskName) {
+                from(target.datagenClientDirectory)
+                mustRunAfter(clientData.runTask)
+            }
+
+            project.tasks.named(target.sourceSet.jarTaskName) {
+                dependsOn(clientData.runTask)
             }
 
             target.test.onConfigured {
-                project.tasks.named(it.sourceSet.processResourcesTaskName, ProcessResources::class.java) {
-                    it.from(target.datagenClientDirectory)
+                project.tasks.named<ProcessResources>(it.sourceSet.processResourcesTaskName) {
+                    from(target.datagenClientDirectory)
+                    mustRunAfter(clientData.runTask)
                 }
             }
 
-            // afterEvaluate needed because idea APIs are not lazy
-            project.afterEvaluate {
-                project.ideaModule(target.sourceSet) {
-                    it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-                }
+            project.withIdeaModule(target.sourceSet) {
+                it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
+            }
 
-                target.test.onConfigured {
-                    project.ideaModule(it.sourceSet) {
-                        it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
-                    }
+            target.test.onConfigured {
+                project.withIdeaModule(it.sourceSet) {
+                    it.resourceDirs.add(target.datagenClientDirectory.get().asFile)
                 }
             }
         }
@@ -221,40 +257,44 @@ internal abstract class FabricRunConfigurations @Inject constructor(val target: 
     }
 
     override val test = project.lazyConfigurable {
+        val compilation = target.test.value
+
         create(SourceSet.TEST_SOURCE_SET_NAME) {
-            it.gameTestServer {
-                it.modOutputs.from(project.modOutputs(target.test.value))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+            gameTestServer {
+                modOutputs.set(project.modOutputs(compilation))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+
+                gameJar.set(compilation.flatMap { it.commonMinecraftFile })
+                writeGameLibrariesTask.set(target.writeCommonGameLibrariesTask)
             }
+        }.withCompilation(target, compilation) {
+            quotedDescription(CommonSecondarySourceSets::test.name)
         }
-            .sourceSet(target.test.value.map(Compilation::sourceSet))
     }
 
     override val clientTest = project.lazyConfigurable {
-        create(ClochePlugin.CLIENT_COMPILATION_NAME, SourceSet.TEST_SOURCE_SET_NAME) {
-            it.gameTestClient {
-                val compilation = target.client.value.flatMap { it.test.value }.orElse(target.test.value)
+        val compilation = target.client.value.flatMap { it.test.value }.orElse(target.test.value)
 
-                it.modOutputs.from(project.modOutputs(compilation))
-                it.writeRemapClasspathTask.set(target.writeRemapClasspathTask)
+        create(ClochePlugin.CLIENT_TEST_COMPILATION_NAME) {
+            gameTestClient {
+                modOutputs.set(project.modOutputs(compilation))
+                writeRemapClasspathTask.set(target.writeRemapClasspathTask)
 
-                it.minecraftVersion.set(target.minecraftVersion)
-                it.extractNativesTask.set(
-                    project.tasks.named(
-                        target.sourceSet.extractNativesTaskName,
-                        ExtractNatives::class.java
-                    )
+                minecraftVersion.set(target.minecraftVersion)
+                extractNativesTask.set(
+                    project.tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName)
                 )
-                it.downloadAssetsTask.set(
-                    project.tasks.named(
-                        target.sourceSet.downloadAssetsTaskName,
-                        DownloadAssets::class.java
-                    )
+                downloadAssetsTask.set(
+                    project.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName)
                 )
+
+                gameJar.set(compilation.flatMap { it.commonMinecraftFile })
+                clientJar.set(compilation.flatMap { it.clientMinecraftFile })
+
+                writeGameLibrariesTask.set(target.writeClientGameLibrariesTask)
             }
+        }.withCompilation(target, compilation) {
+            clientDescription(CommonSecondarySourceSets::test.name)
         }
-            .sourceSet(
-                target.client.value.flatMap { it.test.value }.orElse(target.test.value).map(Compilation::sourceSet)
-            )
     }
 }

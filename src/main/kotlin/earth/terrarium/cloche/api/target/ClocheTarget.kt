@@ -6,18 +6,24 @@ import org.gradle.api.provider.Provider
 
 internal const val TARGET_NAME_PATH_SEPARATOR = ':'
 
+val ClocheTarget.targetName
+    get() = name.takeUnless(String::isEmpty)
+
+val ClocheTarget.isSingleTarget
+    get() = targetName == null
+
 @JvmDefaultWithoutCompatibility
-sealed interface ClocheTarget : TargetTreeElement {
+interface ClocheTarget : TargetTreeElement {
     val dependsOn: DomainObjectCollection<CommonTarget>
 
     val featureName
-        get() = lowerCamelCaseGradleName(name)
+        get() = targetName?.let { lowerCamelCaseGradleName(it) }
 
-    val classifierName
-        get() = name.replace(TARGET_NAME_PATH_SEPARATOR, '-')
+    val capabilitySuffix
+        get() = targetName?.replace(TARGET_NAME_PATH_SEPARATOR, '-')
 
     val namePath
-        get() = name.replace(TARGET_NAME_PATH_SEPARATOR, '/')
+        get() = targetName?.replace(TARGET_NAME_PATH_SEPARATOR, '/')
 
     val loaderName: String
 
