@@ -6,12 +6,7 @@ import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.MinecraftModLoader
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.metadata.RootMetadata
-import earth.terrarium.cloche.api.target.CommonTarget
-import earth.terrarium.cloche.api.target.FabricTarget
-import earth.terrarium.cloche.api.target.ForgeTarget
-import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.api.target.NeoforgeTarget
-import earth.terrarium.cloche.api.target.targetName
+import earth.terrarium.cloche.api.target.*
 import earth.terrarium.cloche.target.common.CommonTargetInternal
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
@@ -20,26 +15,14 @@ import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.fabric.FabricInstallerComponentMetadataRule
 import net.msrandom.minecraftcodev.includes.ExtractIncludes
 import net.msrandom.minecraftcodev.includes.StripIncludes
-import org.gradle.api.Action
-import org.gradle.api.DomainObjectCollection
-import org.gradle.api.InvalidUserCodeException
-import org.gradle.api.NamedDomainObjectContainer
-import org.gradle.api.PolymorphicDomainObjectContainer
-import org.gradle.api.Project
+import org.gradle.api.*
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.BasePluginExtension
 import org.gradle.api.provider.Property
-import org.gradle.kotlin.dsl.domainObjectContainer
-import org.gradle.kotlin.dsl.domainObjectSet
-import org.gradle.kotlin.dsl.newInstance
-import org.gradle.kotlin.dsl.polymorphicDomainObjectContainer
-import org.gradle.kotlin.dsl.property
-import org.gradle.kotlin.dsl.registerTransform
-import org.gradle.kotlin.dsl.withModule
-import org.gradle.kotlin.dsl.withType
+import org.gradle.kotlin.dsl.*
 import javax.inject.Inject
 
 internal val Project.cloche

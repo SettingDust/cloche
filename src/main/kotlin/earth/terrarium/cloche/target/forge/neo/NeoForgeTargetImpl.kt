@@ -62,10 +62,6 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
             )
         }
 
-        loadMappingsTask.configure {
-            namedSrg.set(true)
-        }
-
         resolvePatchedMinecraft.configure {
             neoforge.set(true)
         }

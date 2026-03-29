@@ -1,11 +1,7 @@
 package earth.terrarium.cloche
 
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import org.gradle.api.attributes.Attribute
-import org.gradle.api.attributes.AttributeCompatibilityRule
-import org.gradle.api.attributes.AttributeDisambiguationRule
-import org.gradle.api.attributes.CompatibilityCheckDetails
-import org.gradle.api.attributes.MultipleCandidatesDetails
+import org.gradle.api.attributes.*
 
 /**
  * Indicates that the variant is fully remapped
@@ -90,7 +86,7 @@ object ClocheTargetAttribute {
 
     class CompatibilityRule : AttributeCompatibilityRule<String> {
         override fun execute(details: CompatibilityCheckDetails<String>) {
-            if (details.producerValue ==  null || details.producerValue == INITIAL || details.consumerValue == INITIAL) {
+            if (details.producerValue == null || details.producerValue == INITIAL || details.consumerValue == INITIAL) {
                 details.compatible()
             }
         }
@@ -148,3 +144,4 @@ class DataDisambiguationRule : AttributeDisambiguationRule<Boolean> {
         }
     }
 }
+

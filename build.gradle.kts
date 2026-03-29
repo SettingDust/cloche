@@ -39,15 +39,15 @@ java {
 }
 
 dependencies {
-    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.9")
-    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.8.1-dust.1")
-    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.7.0-dust.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.6.1")
-    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.6.8")
-    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.6.9-dust.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.8.2-dust.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.7.0-dust.1")
+    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.6.1-dust.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.6.8-dust.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.3-dust.0")
     implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.7.1-dust.1")
-    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5-dust")
+    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0-dust.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5-dust.0")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
     implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6")
