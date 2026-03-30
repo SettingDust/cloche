@@ -29,6 +29,12 @@ jobs:
         with:
           cache-read-only: false
 
+      - name: Extract version
+        run: |
+          VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2)
+          echo "version=$VERSION" >> $GITHUB_ENV
+          echo "Detected version: $VERSION"
+
       - name: Checkout Maven Repo
         uses: actions/checkout@v6
         with:
@@ -69,7 +75,10 @@ jobs:
           
           if git diff --cached --quiet; then
             echo "No changes to publish."
+            echo "has_changes=false" >> $GITHUB_ENV
           else
+            echo "has_changes=true" >> $GITHUB_ENV
+            
             # List changed modules from git diff
             CHANGED=$(git diff --cached --name-only | grep "^repository/$GROUP_PATH/" | cut -d/ -f4 | sort -u | tr '\n' ' ' | xargs)
             echo "Changed modules: $CHANGED"
@@ -84,4 +93,20 @@ jobs:
             
             git commit -m "$COMMIT_MSG"
             git push
+          fi
+
+      - name: Create or update tag
+        if: env.has_changes == 'true'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          if git rev-parse "$version" >/dev/null 2>&1; then
+            echo "Tag $version already exists, moving to current commit."
+            git tag -f "$version"
+            git push origin "$version" --force
+          else
+            git tag "$version"
+            git push origin "$version"
+            echo "Created and pushed tag: $version"
           fi
