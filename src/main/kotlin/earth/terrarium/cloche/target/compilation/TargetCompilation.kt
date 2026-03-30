@@ -179,26 +179,29 @@ private fun setupModTransformationPipeline(
 ) {
     // afterEvaluate needed as the registration of a transform is dependent on a lazy provider
     project.afterEvaluate {
+        var noopRegistered = false
+
         for (remapNamespace in target.mappings.remapNamespaces.get()) {
             val namespace =
                 remapNamespace.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
 
-            // When modRemapNamespace is empty, default deps don't need remapping.
-            // Register NoopAction to provide an exact match (namespace=INITIAL) so that
-            // default deps pass through, while cross-namespace deps (e.g., INTERMEDIARY)
-            // still get remapped via RemapAction.
             if (namespace.isEmpty()) {
-                project.dependencies.registerTransform(NoopAction::class) {
-                    from
-                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                        .attribute(REMAPPED_ATTRIBUTE, false)
+                if (!noopRegistered) {
+                    noopRegistered = true
+                    project.dependencies.registerTransform(NoopAction::class) {
+                        from
+                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                            .attribute(REMAPPED_ATTRIBUTE, false)
+                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-                    to
-                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                        .attribute(REMAPPED_ATTRIBUTE, true)
+                        to
+                            .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                            .attribute(REMAPPED_ATTRIBUTE, true)
+                            .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
 
-                    compilation.baseAttributes(from)
-                    compilation.baseAttributes(to)
+                        compilation.baseAttributes(from)
+                        compilation.baseAttributes(to)
+                    }
                 }
 
                 continue
@@ -298,16 +301,25 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val metadataDirectory: Provider<Directory>
         @Internal
-        get() = project.layout.buildDirectory.dir("generated").map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
+        get() = project.layout.buildDirectory.dir("generated")
+            .map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
 
-    val finalMinecraftFile get() =
-        setupFiles.libraryArtifact
+    val finalMinecraftFile
+        get() =
+            setupFiles.libraryArtifact
 
-    val sources get() =
-        setupFiles.sourcesArtifact
+    val sources
+        get() =
+            setupFiles.sourcesArtifact
 
     val includeBucketConfiguration: NamedDomainObjectProvider<DependencyScopeConfiguration> =
-        project.configurations.dependencyScope(lowerCamelCaseGradleName(_info.target.featureName, featureName, "include")) {
+        project.configurations.dependencyScope(
+            lowerCamelCaseGradleName(
+                _info.target.featureName,
+                featureName,
+                "include"
+            )
+        ) {
             addCollectedDependencies(dependencyHandler.include)
         }
 
