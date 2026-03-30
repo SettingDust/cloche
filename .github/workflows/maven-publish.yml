@@ -2,8 +2,7 @@ name: Publish to Maven Repository
 
 on:
   push:
-    tags: [ '[0-9]+.[0-9]+.[0-9]+*' ]
-    branches: [ 'main', 'master' ]
+    branches: ['main']
     paths:
       - 'gradle.properties'
   workflow_dispatch:
@@ -30,118 +29,59 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $VERSION"
-
-      - name: Check if tag exists
-        id: check_tag
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag $VERSION already exists"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Tag $VERSION does not exist"
-          fi
-
-      - name: Create and push tag
-        if: steps.check_tag.outputs.exists == 'false' && github.ref_type != 'tag'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git tag "$VERSION"
-          git push origin "$VERSION"
-          echo "Created and pushed tag: $VERSION"
-
-      - name: Verify tag matches version
-        if: github.ref_type == 'tag'
-        run: |
-          TAG_VERSION="${GITHUB_REF#refs/tags/}"
-          GRADLE_VERSION="${{ steps.version.outputs.version }}"
-          
-          if [ "$TAG_VERSION" != "$GRADLE_VERSION" ]; then
-            echo "Error: Tag version ($TAG_VERSION) does not match gradle.properties version ($GRADLE_VERSION)"
-            exit 1
-          fi
-          
-          echo "Version verification passed: $TAG_VERSION"
-
-      - name: Snapshot .m2 before build
-        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
-        run: |
-          mkdir -p /tmp/m2-snapshot
-          if [ -d "$HOME/.m2/repository/$GROUP_PATH" ]; then
-            find "$HOME/.m2/repository/$GROUP_PATH" -type f | sort > /tmp/m2-snapshot/before.txt
-          else
-            touch /tmp/m2-snapshot/before.txt
-          fi
-
-      - uses: burrunan/gradle-cache-action@v3
-        name: Execute Gradle build
-        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
-        with:
-          arguments: publishToMavenLocal
-
       - name: Checkout Maven Repo
-        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
         uses: actions/checkout@v6
         with:
           repository: SettingDust/maven
           token: ${{ secrets.MAVEN_REPO_TOKEN }}
           path: maven-repo
 
-      - name: Copy artifacts
-        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
+      - name: Build all modules
+        uses: burrunan/gradle-cache-action@v3
+        with:
+          arguments: publishToMavenLocal
+
+      - name: Copy artifacts to Maven repo
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          SOURCE="$HOME/.m2/repository/$GROUP_PATH"
+          TARGET="maven-repo/repository/$GROUP_PATH"
           
-          # Find all new files added by the build
-          find "$HOME/.m2/repository/$GROUP_PATH" -type f | sort > /tmp/m2-snapshot/after.txt
+          mkdir -p "$TARGET"
           
-          # Get the list of new files
-          comm -13 /tmp/m2-snapshot/before.txt /tmp/m2-snapshot/after.txt > /tmp/m2-snapshot/new-files.txt
-          
-          echo "New files to copy:"
-          cat /tmp/m2-snapshot/new-files.txt
-          
-          # Copy each new file to the maven repo, preserving directory structure
-          while IFS= read -r file; do
-            if [ -n "$file" ]; then
-              # Extract relative path from .m2/repository/
-              relative_path="${file#$HOME/.m2/repository/}"
-              target_file="maven-repo/repository/$relative_path"
-              
-              # Create target directory
-              mkdir -p "$(dirname "$target_file")"
-              
-              # Copy file
-              cp "$file" "$target_file"
-              echo "Copied: $relative_path"
-            fi
-          done < /tmp/m2-snapshot/new-files.txt
-          
-          # Also copy/update maven-metadata files for all artifacts under GROUP_PATH
-          find "$HOME/.m2/repository/$GROUP_PATH" -name "maven-metadata-local.xml" | while read -r metadata; do
-            relative_path="${metadata#$HOME/.m2/repository/}"
-            target_dir="$(dirname "maven-repo/repository/$relative_path")"
-            mkdir -p "$target_dir"
-            cp "$metadata" "$target_dir/"
-            echo "Copied metadata: $relative_path"
-          done
+          if [ -d "$SOURCE" ]; then
+            echo "Copying all published artifacts to maven repo..."
+            cp -r "$SOURCE/"* "$TARGET/"
+            
+            # Remove local-only metadata files
+            find "$TARGET" -name "maven-metadata-local.xml" -delete
+            echo "Done."
+          else
+            echo "ERROR: Local repository not found at $SOURCE"
+            exit 1
+          fi
 
       - name: Commit and push
-        if: github.ref_type == 'tag' || steps.check_tag.outputs.exists == 'false'
         working-directory: maven-repo
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add repository/
-          git commit -m "chore(release): publish version $VERSION" || echo "No changes to commit"
-          git push
+          
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+          else
+            # List changed modules from git diff
+            CHANGED=$(git diff --cached --name-only | grep "^repository/$GROUP_PATH/" | cut -d/ -f4 | sort -u | tr '\n' ' ' | xargs)
+            echo "Changed modules: $CHANGED"
+            
+            MODULE_COUNT=$(echo "$CHANGED" | wc -w)
+            if [ "$MODULE_COUNT" -eq 1 ]; then
+              COMMIT_MSG="chore(release): publish $CHANGED"
+            else
+              BODY=$(echo "$CHANGED" | tr ' ' '\n' | sed 's/^/- /')
+              COMMIT_MSG=$(printf "chore(release): publish %d modules\n\nChanged modules:\n%s" "$MODULE_COUNT" "$BODY")
+            fi
+            
+            git commit -m "$COMMIT_MSG"
+            git push
+          fi
