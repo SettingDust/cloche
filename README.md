@@ -1,5 +1,63 @@
 # Cloche
+
 A general-purpose Minecraft Gradle plugin for all sorts of use-cases.
+
+This is a fork of [terrarium-earth/cloche](https://github.com/terrarium-earth/cloche) with the following changes:
+
+### Mixin ([cloche#65](https://github.com/terrarium-earth/cloche/pull/65))
+- Build-time mixin application for compile classpath, providing better IDE experience
+
+### Remapping & Mappings ([cloche#87](https://github.com/terrarium-earth/cloche/pull/87))
+- Allow specify remap namespace for dependency
+- Allow adding intermediary or searge minecraft dependency
+
+For example, to use a Fabric mod on a Forge target:
+```kt
+cloche.forge.mappings {
+    fabricIntermediary()
+}
+
+cloche.forge.dependencies {
+    // Add Forge Minecraft with MCP/Searge mappings
+    remapClasspath(forgeMinecraft("1.20.1", "47.4.4"))
+
+    // Remap a Fabric mod from intermediary namespace
+    modImplementation("maven.modrinth:surveyor:0.6.26+1.20") {
+        attributes {
+            attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INTERMEDIARY)
+        }
+    }
+}
+```
+
+Or to use a mod mapped in MCP/Searge:
+```kt
+cloche.target.mappings {
+    mcpSearge()
+}
+
+cloche.target.dependencies {
+    remapClasspath(forgeMinecraft("1.20.1", "47.4.4"))
+
+    modImplementation(catalog.dynamictrees.mc120.forge) {
+        attributes {
+            attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.SEARGE)
+        }
+    }
+}
+```
+
+### Target Attribute ([cloche#130](https://github.com/terrarium-earth/cloche/pull/130))
+- Fix incorrectly resolving other targets with the same Minecraft version and loader
+- Add cloche target attribute for proper target disambiguation
+
+### Build & Compilation
+- Uses [SettingDust/minecraft-codev](https://github.com/SettingDust/minecraft-codev) fork of codev
+- JVM version targeting for common compilations ([cloche#153](https://github.com/terrarium-earth/cloche/pull/153))
+
+### jvm-multiplatform
+- Parallel stub API creation ([jvm-multiplatform#20](https://github.com/terrarium-earth/jvm-multiplatform/pull/20))
+- Method body stub support ([jvm-multiplatform#21](https://github.com/terrarium-earth/jvm-multiplatform/pull/21))
 
 Cloche functions in terms of targets, a target can have any Minecraft version or mod loader setup that you compile to, all within the same project.
 
