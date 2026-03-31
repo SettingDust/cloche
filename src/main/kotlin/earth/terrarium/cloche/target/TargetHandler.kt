@@ -18,7 +18,6 @@ import net.msrandom.minecraftcodev.runs.downloadAssetsTaskName
 import net.msrandom.minecraftcodev.runs.extractNativesTaskName
 import net.msrandom.minecraftcodev.runs.task.DownloadAssets
 import net.msrandom.minecraftcodev.runs.task.ExtractNatives
-import org.gradle.api.JavaVersion
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
@@ -30,14 +29,11 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.SourceSetContainer
-import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
@@ -239,20 +235,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             target.addJarInjects(compilation)
         }
 
-        val javaVersion = target.jvmVersion
-
-        // TODO do the same for the javadoc tasks
-        tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
-            options.release.set(javaVersion)
-        }
-
-        plugins.withId(ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID) {
-            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
-                compilerOptions.jvmTarget.set(javaVersion.map {
-                    JvmTarget.fromTarget(JavaVersion.toVersion(it).toString())
-                })
-            }
-        }
+        configureJvmTarget(sourceSet, target.jvmVersion)
 
         val resolvableConfigurationNames = listOf(
             sourceSet.compileClasspathConfigurationName,

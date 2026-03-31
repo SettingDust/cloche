@@ -117,9 +117,7 @@ internal abstract class CommonTargetInternal @Inject constructor(
     val jvmVersion: Provider<Int> = dependents.flatMap { dependants ->
         dependants
             .map { (it as MinecraftTargetInternal).jvmVersion }
-            .reduce { acc, next ->
-                acc.zip(next) { a, b -> minOf(a, b) }
-            }
+            .reduce { acc, next -> acc.zip(next, ::minOf) }
     }
 
     override fun getName() = name
