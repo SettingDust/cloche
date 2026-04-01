@@ -5,9 +5,11 @@ import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
 import earth.terrarium.cloche.api.target.NeoforgeTarget
-import earth.terrarium.cloche.target.*
+import earth.terrarium.cloche.target.LazyConfigurableInternal
+import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
+import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
 import earth.terrarium.cloche.util.createLoaderDependency
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
@@ -113,7 +115,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         if (isUnobfuscatedVersion(it)) {
             emptyList()
         } else {
-            listOf(generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
+            listOf(generateClientExtra)
         }
     })
 
