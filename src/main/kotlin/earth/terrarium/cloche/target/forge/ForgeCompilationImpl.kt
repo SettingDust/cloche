@@ -3,13 +3,13 @@ package earth.terrarium.cloche.target.forge
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.target.compilation.ForgeCompilation
-import earth.terrarium.cloche.util.withIdeaModule
+import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.compilation.TargetCompilationInfo
-import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
 import earth.terrarium.cloche.tasks.GenerateForgeModsToml
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
+import earth.terrarium.cloche.util.withIdeaModule
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
 import net.msrandom.minecraftcodev.forge.task.JarJar
@@ -20,7 +20,6 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
-import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
 import javax.inject.Inject
@@ -61,12 +60,12 @@ internal abstract class ForgeCompilationImpl @Inject constructor(info: ForgeComp
         lowerCamelCaseGradleName("write", target.featureName, featureName, "legacyClasspath"),
     ) {
         classpath.from(target.minecraftLibrariesConfiguration)
-        classpath.from(target.generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
         classpath.from(legacyClasspathConfiguration)
 
         if (target is ForgeTargetImpl) {
             classpath.from(finalMinecraftFile)
         }
+        classpath.from(target.generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
     }
 
     internal val generateModsToml = project.tasks.register<GenerateForgeModsToml>(
