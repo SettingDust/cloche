@@ -128,7 +128,7 @@ internal abstract class MinecraftTargetInternal(
 
         project.afterEvaluate {
             if (!loaderVersion.isPresent) {
-                throw InvalidUserCodeException("loaderVersion not set for target '$name'")
+                throw InvalidUserCodeException("loaderVersion not set for target '${this@MinecraftTargetInternal.name}'")
             }
         }
     }

@@ -204,20 +204,20 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         main.dependencyHandler.runtimeOnly(clientExtra)
 
-        val userdev = forgeDependency {
+        fun userdev() = forgeDependency {
             capabilities {
                 requireFeature("moddev-bundle")
             }
         }
 
-        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev)
+        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev())
 
         resolvePatchedMinecraft.configure {
             patches.from(project.configurations.named(sourceSet.patchesConfigurationName))
             libraries.from(minecraftLibrariesConfiguration)
         }
 
-        project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev)
+        project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev())
 
         registerMappings()
     }
