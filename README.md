@@ -2,14 +2,21 @@
 
 A general-purpose Minecraft Gradle plugin for all sorts of use-cases.
 
-This is a fork of [terrarium-earth/cloche](https://github.com/terrarium-earth/cloche) with the following changes:
+## Fork-specific changes
+
+This fork tracks [terrarium-earth/cloche](https://github.com/terrarium-earth/cloche) and carries several additions and fixes that improve IDE support, remapping flexibility, and target resolution.
+
+> [!IMPORTANT]
+> Fork releases and related `-dust.*` artifacts are published to:
+> `https://raw.githubusercontent.com/settingdust/maven/main/repository/`
 
 ### Mixin ([cloche#65](https://github.com/terrarium-earth/cloche/pull/65))
-- Build-time mixin application for compile classpath, providing better IDE experience
+- Build-time mixin application for the compile classpath, providing a better IDE and debugging experience
 
 ### Remapping & Mappings ([cloche#87](https://github.com/terrarium-earth/cloche/pull/87))
-- Allow specify remap namespace for dependency
-- Allow adding intermediary or searge minecraft dependency
+- Allow specifying a remap namespace per dependency
+- Allow adding intermediary or MCP/Searge Minecraft dependencies
+- Useful for mixing Fabric and Forge/NeoForge artifacts in the same target
 
 For example, to use a Fabric mod on a Forge target:
 ```kt
@@ -49,11 +56,11 @@ cloche.target.dependencies {
 
 ### Target Attribute ([cloche#130](https://github.com/terrarium-earth/cloche/pull/130))
 - Fix incorrectly resolving other targets with the same Minecraft version and loader
-- Add cloche target attribute for proper target disambiguation
+- Add a dedicated Cloche target attribute for proper target disambiguation
 
 ### Build & Compilation
-- Uses [SettingDust/minecraft-codev](https://github.com/SettingDust/minecraft-codev) fork of codev
-- JVM version targeting for common compilations ([cloche#153](https://github.com/terrarium-earth/cloche/pull/153))
+- Uses the [SettingDust/minecraft-codev](https://github.com/SettingDust/minecraft-codev) fork of codev
+- Adds JVM version targeting for common compilations ([cloche#153](https://github.com/terrarium-earth/cloche/pull/153))
 
 ### jvm-multiplatform
 - Parallel stub API creation ([jvm-multiplatform#20](https://github.com/terrarium-earth/jvm-multiplatform/pull/20))
@@ -75,6 +82,19 @@ A plethora of easily configurable features, including but not limited to:
 If you publish a library/mod API with Cloche, variants are automatically configured for consumers, thus if you use the library in common, it will automatically pick the right variants for each consuming target.
 
 ## Setup
+
+> [!IMPORTANT]
+> If you are using this fork, add the custom Maven repository below in `settings.gradle` or `settings.gradle.kts` so Gradle can resolve the plugin and its forked dependencies:
+>
+> ```kt
+> pluginManagement {
+>     repositories {
+>         gradlePluginPortal()
+>         maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/")
+>     }
+> }
+> ```
+
 The basic structure for using Cloche in a `build.gradle`(`.kts`) build script is generally as follows:
 ```kt
 plugins {
@@ -87,6 +107,8 @@ version = "1.0.0"
 
 // Add the relevant repositories, depending on what targets you have
 repositories {
+  maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/") // Required for this fork and forked codev artifacts
+
   cloche.librariesMinecraft() // libraries.minecraft.net, always recommended first as Mojang sometimes publishes non-standard classifiers there which are needed on certain platforms
 
   mavenCentral() // Maven central second for best reliability
