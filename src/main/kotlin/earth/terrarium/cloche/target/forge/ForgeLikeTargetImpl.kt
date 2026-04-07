@@ -210,14 +210,18 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             }
         }
 
-        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev())
+        project.configurations.named(sourceSet.patchesConfigurationName) {
+            dependencies.addAllLater(userdev().map(::listOf))
+        }
 
         resolvePatchedMinecraft.configure {
             patches.from(project.configurations.named(sourceSet.patchesConfigurationName))
             libraries.from(minecraftLibrariesConfiguration)
         }
 
-        project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev())
+        project.configurations.named(sourceSet.mappingsConfigurationName) {
+            dependencies.addAllLater(userdev().map(::listOf))
+        }
 
         registerMappings()
     }
