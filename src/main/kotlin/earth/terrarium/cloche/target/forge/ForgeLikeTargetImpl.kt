@@ -123,7 +123,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
+            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output), clientExtra),
             minecraftFile,
             data = false,
             test = false,
