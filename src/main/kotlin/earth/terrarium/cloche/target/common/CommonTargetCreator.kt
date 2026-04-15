@@ -30,6 +30,7 @@ import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.plugin.PLUGIN_CLASSPATH_CONFIGURATION_NAME
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 private const val GENERATE_JAVA_EXPECT_STUBS_OPTION = "generateExpectStubs"
 
@@ -243,6 +244,10 @@ internal fun createCommonTarget(
                 sourceSet.compileOnlyConfigurationName,
                 "net.msrandom:kmp-stub-annotations:1.0.0",
             )
+
+            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
+                compilerOptions.freeCompilerArgs.add("-Xexpect-actual-classes")
+            }
         }
     }
 
