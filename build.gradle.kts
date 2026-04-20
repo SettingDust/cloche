@@ -50,7 +50,7 @@ dependencies {
     implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5-dust.1")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
-    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6")
+    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6-dust.0")
     implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.12-dust.0")
 
     implementation(group = "net.peanuuutz.tomlkt", name = "tomlkt", version = "0.5.0")
