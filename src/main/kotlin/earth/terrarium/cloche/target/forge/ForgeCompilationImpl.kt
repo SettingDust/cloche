@@ -10,6 +10,7 @@ import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
 import earth.terrarium.cloche.tasks.GenerateForgeModsToml
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
 import earth.terrarium.cloche.util.withIdeaModule
+import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
 import net.msrandom.minecraftcodev.forge.task.JarJar
@@ -101,6 +102,30 @@ internal abstract class ForgeCompilationImpl @Inject constructor(info: ForgeComp
     }
 
     init {
+        // Ensure generateClientExtra runs before any classpath resolution.
+        // The RemapAction transform parameters resolve runtimeClasspath, which contains clientExtra.
+        // Without this, the transform tries to process client-extra.jar before it exists.
+        // Only needed for obfuscated versions that actually produce client-extra.
+        val clientExtraBuildDependenciesHolder = project.configurations.detachedConfiguration(
+            project.dependencies.create(
+                project.files(target.minecraftVersion.map {
+                    if (isUnobfuscatedVersion(it)) {
+                        emptyList()
+                    } else {
+                        listOf(target.generateClientExtra)
+                    }
+                })
+            )
+        )
+
+        project.configurations.named(sourceSet.compileClasspathConfigurationName) {
+            extendsFrom(clientExtraBuildDependenciesHolder)
+        }
+
+        project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
+            extendsFrom(clientExtraBuildDependenciesHolder)
+        }
+
         project.tasks.named<ProcessResources>(sourceSet.processResourcesTaskName) {
             from(metadataDirectory)
 

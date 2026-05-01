@@ -123,17 +123,13 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private val clientExtra = run {
-        val dependency = minecraftVersion.map {
-            if (isUnobfuscatedVersion(it)) {
-                emptyList()
-            } else {
-                listOf(generateClientExtra)
-            }
+    private val clientExtra = project.files(minecraftVersion.map {
+        if (isUnobfuscatedVersion(it)) {
+            emptyList()
+        } else {
+            listOf(generateClientExtra)
         }
-
-        project.files(dependency).builtBy(dependency)
-    }
+    })
 
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(

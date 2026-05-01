@@ -18,6 +18,7 @@ import earth.terrarium.cloche.util.optionalDir
 import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
 import net.msrandom.minecraftcodev.core.getVersionList
 import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
+import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
@@ -72,8 +73,8 @@ internal abstract class MinecraftTargetInternal(
         val loadMappings = project.dependencies.create(project.files().builtBy(loadMappingsTask))
         val configuration = project.configurations.detachedConfiguration()
 
-        configuration.dependencies.addAllLater(minecraftRemapNamespace.map {
-            if (it.isEmpty()) {
+        configuration.dependencies.addAllLater(minecraftVersion.map {
+            if (isUnobfuscatedVersion(it)) {
                 emptyList()
             } else {
                 listOf(loadMappings)
