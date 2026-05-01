@@ -66,18 +66,6 @@ cloche.target.dependencies {
 - Parallel stub API creation ([jvm-multiplatform#20](https://github.com/terrarium-earth/jvm-multiplatform/pull/20))
 - Method body stub support ([jvm-multiplatform#21](https://github.com/terrarium-earth/jvm-multiplatform/pull/21))
 
-Cloche functions in terms of targets, a target can have any Minecraft version or mod loader setup that you compile to, all within the same project.
-
-A plethora of easily configurable features, including but not limited to:
-- Separated client source-set where possible
-- Simple Data Generation
-- Tests for all different source-sets and configurations
-- Run configurations generated for various different cases
-- Pre-applied mixins, allowing for a better debug experience (WIP)
-- Mod metadata(`fabric.mod.json`, `neoforge.mods.toml`, etc) generated for all targets
-- Multi-platform utilities when using multiple targets, such as Java @Expect/@Actual annotations and Kotlin multiplatform features
-  - Part of the [jvm-multiplatform](https://github.com/MsRandom/jvm-multiplatform) tool suite
-
 ### Minecraft Artifact Provider
 Each `MinecraftTarget` exposes a `minecraftArtifacts` property that provides compile-time type-safe access to resolved Minecraft JARs and classpath. The concrete type varies by target — `FabricArtifactProvider` for Fabric, `ForgeLikeArtifactProvider` for Forge/NeoForge — so only the namespaces and distributions actually supported by each loader are available.
 
@@ -102,10 +90,25 @@ forgeTarget.minecraftArtifacts.searge.classpath        // FileCollection
 
 Available namespaces per target type:
 
-| Target           | Provider Type              | Namespaces             | Distributions      |
-|------------------|----------------------------|------------------------|---------------------|
-| Fabric           | `FabricArtifactProvider`   | `obf`, `intermediary`  | `common`, `client`  |
-| Forge / NeoForge | `ForgeLikeArtifactProvider`| `searge`               | single merged jar   |
+| Target           | Provider Type               | Namespaces            | Distributions      |
+|------------------|-----------------------------|-----------------------|--------------------|
+| Fabric           | `FabricArtifactProvider`    | `obf`, `intermediary` | `common`, `client` |
+| Forge / NeoForge | `ForgeLikeArtifactProvider` | `searge`              | single merged jar  |
+
+
+## Original README
+
+Cloche functions in terms of targets, a target can have any Minecraft version or mod loader setup that you compile to, all within the same project.
+
+A plethora of easily configurable features, including but not limited to:
+- Separated client source-set where possible
+- Simple Data Generation
+- Tests for all different source-sets and configurations
+- Run configurations generated for various different cases
+- Pre-applied mixins, allowing for a better debug experience (WIP)
+- Mod metadata(`fabric.mod.json`, `neoforge.mods.toml`, etc) generated for all targets
+- Multi-platform utilities when using multiple targets, such as Java @Expect/@Actual annotations and Kotlin multiplatform features
+  - Part of the [jvm-multiplatform](https://github.com/MsRandom/jvm-multiplatform) tool suite
 
 ### Publishing and Consumption
 If you publish a library/mod API with Cloche, variants are automatically configured for consumers, thus if you use the library in common, it will automatically pick the right variants for each consuming target.
