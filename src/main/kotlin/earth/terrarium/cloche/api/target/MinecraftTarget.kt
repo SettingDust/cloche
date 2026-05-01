@@ -48,4 +48,10 @@ interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDep
     fun mappings(action: Action<MappingsBuilder>)
 
     fun runs(action: Action<RunConfigurations>)
+
+    /**
+     * Provides access to resolved Minecraft JAR artifacts and classpath
+     * for different mapping namespaces.
+     */
+    val minecraftArtifacts: MinecraftArtifactProvider
 }

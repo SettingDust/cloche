@@ -1,6 +1,9 @@
 package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
+import earth.terrarium.cloche.api.target.MinecraftArtifactProvider
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
@@ -73,6 +76,23 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }))
     }
 
+    override val minecraftArtifacts = object : MinecraftArtifactProvider {
+        override val intermediaryNamespace = RemapNamespaceAttribute.SEARGE
+
+        override fun jars(namespace: String) = when (namespace) {
+            RemapNamespaceAttribute.SEARGE -> mapOf(
+                ModDistribution.common to resolvePatchedMinecraft.flatMap { it.output },
+            )
+
+            else -> null
+        }
+
+        override fun classpath(namespace: String) = when (namespace) {
+            RemapNamespaceAttribute.SEARGE -> minecraftLibrariesConfiguration
+            else -> project.files()
+        }
+    }
+
     internal val generateClientExtra = project.tasks.register<GenerateForgeClientExtra>(
         lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
     ) {
@@ -123,7 +143,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output), clientExtra),
+            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
             minecraftFile,
             data = false,
             test = false,
@@ -204,24 +224,20 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         main.dependencyHandler.runtimeOnly(clientExtra)
 
-        fun userdev() = forgeDependency {
+        val userdev = forgeDependency {
             capabilities {
                 requireFeature("moddev-bundle")
             }
         }
 
-        project.configurations.named(sourceSet.patchesConfigurationName) {
-            dependencies.addAllLater(userdev().map(::listOf))
-        }
+        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev)
 
         resolvePatchedMinecraft.configure {
             patches.from(project.configurations.named(sourceSet.patchesConfigurationName))
             libraries.from(minecraftLibrariesConfiguration)
         }
 
-        project.configurations.named(sourceSet.mappingsConfigurationName) {
-            dependencies.addAllLater(userdev().map(::listOf))
-        }
+        project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev)
 
         registerMappings()
     }
