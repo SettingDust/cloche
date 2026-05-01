@@ -2,11 +2,11 @@ package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import earth.terrarium.cloche.api.target.ForgeLikeArtifactProvider
-import earth.terrarium.cloche.api.target.NamespaceArtifacts
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
+import earth.terrarium.cloche.api.target.ForgeLikeArtifactProvider
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
+import earth.terrarium.cloche.api.target.NamespaceArtifacts
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.LazyConfigurableInternal
 import earth.terrarium.cloche.target.MinecraftTargetInternal
@@ -123,13 +123,17 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private val clientExtra = project.files(minecraftVersion.map {
-        if (isUnobfuscatedVersion(it)) {
-            emptyList()
-        } else {
-            listOf(generateClientExtra)
+    private val clientExtra = run {
+        val dependency = minecraftVersion.map {
+            if (isUnobfuscatedVersion(it)) {
+                emptyList()
+            } else {
+                listOf(generateClientExtra)
+            }
         }
-    })
+
+        project.files(dependency).builtBy(dependency)
+    }
 
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(
