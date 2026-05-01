@@ -1,9 +1,9 @@
 package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import earth.terrarium.cloche.api.target.MinecraftArtifactProvider
+import earth.terrarium.cloche.api.target.ForgeLikeArtifactProvider
+import earth.terrarium.cloche.api.target.NamespaceArtifacts
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
@@ -76,20 +76,12 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }))
     }
 
-    override val minecraftArtifacts = object : MinecraftArtifactProvider {
+    override val minecraftArtifacts = object : ForgeLikeArtifactProvider {
         override val intermediaryNamespace = RemapNamespaceAttribute.SEARGE
 
-        override fun jars(namespace: String) = when (namespace) {
-            RemapNamespaceAttribute.SEARGE -> mapOf(
-                ModDistribution.common to resolvePatchedMinecraft.flatMap { it.output },
-            )
-
-            else -> null
-        }
-
-        override fun classpath(namespace: String) = when (namespace) {
-            RemapNamespaceAttribute.SEARGE -> minecraftLibrariesConfiguration
-            else -> project.files()
+        override val searge = object : NamespaceArtifacts {
+            override val jar = resolvePatchedMinecraft.flatMap { it.output }
+            override val classpath = minecraftLibrariesConfiguration
         }
     }
 

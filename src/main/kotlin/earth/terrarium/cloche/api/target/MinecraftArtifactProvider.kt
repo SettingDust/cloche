@@ -1,16 +1,35 @@
 package earth.terrarium.cloche.api.target
 
-import earth.terrarium.cloche.api.attributes.ModDistribution
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 
 /**
- * Provides access to resolved Minecraft JAR artifacts and their associated
- * classpath for different mapping namespaces.
+ * Artifacts for a single-distribution namespace (e.g. Forge's SEARGE).
+ */
+interface NamespaceArtifacts {
+    val jar: Provider<RegularFile>
+    val classpath: FileCollection
+}
+
+/**
+ * Artifacts for a namespace with common/client distribution split (e.g. Fabric).
+ */
+interface DistributedNamespaceArtifacts {
+    val common: Provider<RegularFile>
+    val client: Provider<RegularFile>
+    val classpath: FileCollection
+}
+
+/**
+ * Base provider interface on [MinecraftTarget].
  *
- * Each [MinecraftTarget] implementation supplies its own artifact provider,
- * making Minecraft jar resolution a first-class capability of the target itself.
+ * Each target type refines this with a loader-specific sub-interface that
+ * exposes only the namespaces actually supported by that loader, making
+ * the available artifacts discoverable and type-safe at compile time.
+ *
+ * @see FabricArtifactProvider
+ * @see ForgeLikeArtifactProvider
  */
 interface MinecraftArtifactProvider {
     /**
@@ -20,22 +39,24 @@ interface MinecraftArtifactProvider {
      * for Forge/NeoForge targets this is `"srg"`.
      */
     val intermediaryNamespace: String
+}
 
-    /**
-     * Get Minecraft jar files for a specific mapping namespace.
-     *
-     * @param namespace the mapping namespace to query (e.g. `"obf"`, `"intermediary"`, `"srg"`)
-     * @return a map of [ModDistribution] to jar file provider, or `null` if this namespace
-     *         is not directly available.
-     */
-    fun jars(namespace: String): Map<ModDistribution, Provider<RegularFile>>?
+/**
+ * Fabric-specific artifact provider.
+ *
+ * Exposes [obf] and [intermediary] namespaces, each providing
+ * common and client distribution jars.
+ */
+interface FabricArtifactProvider : MinecraftArtifactProvider {
+    val obf: DistributedNamespaceArtifacts
+    val intermediary: DistributedNamespaceArtifacts
+}
 
-    /**
-     * Get the classpath needed when working with a specific namespace.
-     *
-     * @param namespace the mapping namespace
-     * @return the classpath file collection, or an empty file collection if no
-     *         specific classpath is needed for the given namespace
-     */
-    fun classpath(namespace: String): FileCollection
+/**
+ * Forge / NeoForge artifact provider.
+ *
+ * Exposes the [searge] namespace with a single merged jar.
+ */
+interface ForgeLikeArtifactProvider : MinecraftArtifactProvider {
+    val searge: NamespaceArtifacts
 }

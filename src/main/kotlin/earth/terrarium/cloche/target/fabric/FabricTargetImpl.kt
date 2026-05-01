@@ -3,7 +3,8 @@ package earth.terrarium.cloche.target.fabric
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import earth.terrarium.cloche.api.target.MinecraftArtifactProvider
+import earth.terrarium.cloche.api.target.DistributedNamespaceArtifacts
+import earth.terrarium.cloche.api.target.FabricArtifactProvider
 import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.FabricTarget
 import earth.terrarium.cloche.api.target.compilation.FabricIncludedClient
@@ -163,31 +164,23 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             outputFile.set(output("client-${MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE}"))
         }
 
-    override val minecraftArtifacts = object : MinecraftArtifactProvider {
+    override val minecraftArtifacts = object : FabricArtifactProvider {
         override val intermediaryNamespace = RemapNamespaceAttribute.INTERMEDIARY
 
-        override fun jars(namespace: String) = when (namespace) {
-            RemapNamespaceAttribute.OBF -> mapOf(
-                ModDistribution.common to resolveCommonMinecraft.flatMap { it.output },
-                ModDistribution.client to resolveClientMinecraft.flatMap { it.output },
-            )
-
-            RemapNamespaceAttribute.INTERMEDIARY -> mapOf(
-                ModDistribution.common to remapCommonMinecraftIntermediary.flatMap { it.outputFile },
-                ModDistribution.client to remapClientMinecraftIntermediary.flatMap { it.outputFile },
-            )
-
-            else -> null
+        override val obf = object : DistributedNamespaceArtifacts {
+            override val common = resolveCommonMinecraft.flatMap { it.output }
+            override val client = resolveClientMinecraft.flatMap { it.output }
+            override val classpath = project.files()
         }
 
-        override fun classpath(namespace: String) = when (namespace) {
-            RemapNamespaceAttribute.INTERMEDIARY -> project.files(
+        override val intermediary = object : DistributedNamespaceArtifacts {
+            override val common = remapCommonMinecraftIntermediary.flatMap { it.outputFile }
+            override val client = remapClientMinecraftIntermediary.flatMap { it.outputFile }
+            override val classpath = project.files(
                 commonLibrariesConfiguration,
                 clientLibrariesConfiguration,
                 resolveCommonMinecraft.flatMap { it.output },
             )
-
-            else -> project.files()
         }
     }
 

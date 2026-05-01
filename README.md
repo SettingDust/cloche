@@ -79,30 +79,33 @@ A plethora of easily configurable features, including but not limited to:
   - Part of the [jvm-multiplatform](https://github.com/MsRandom/jvm-multiplatform) tool suite
 
 ### Minecraft Artifact Provider
-Each `MinecraftTarget` exposes a `minecraftArtifacts` property (`MinecraftArtifactProvider`) that gives type-safe access to resolved Minecraft JARs and their classpath for different mapping namespaces.
+Each `MinecraftTarget` exposes a `minecraftArtifacts` property that provides compile-time type-safe access to resolved Minecraft JARs and classpath. The concrete type varies by target — `FabricArtifactProvider` for Fabric, `ForgeLikeArtifactProvider` for Forge/NeoForge — so only the namespaces and distributions actually supported by each loader are available.
 
 ```kt
-// Access Minecraft JARs from any target
+// Fabric — intermediary namespace with common/client jars
 val fabricTarget = cloche.targets.getByName("fabric") as FabricTarget
 
-// Query JARs by mapping namespace — returns Map<ModDistribution, Provider<RegularFile>>
-val intermediaryJars = fabricTarget.minecraftArtifacts.jars("intermediary")
-// intermediaryJars[ModDistribution.common] -> Provider<RegularFile>
-// intermediaryJars[ModDistribution.client] -> Provider<RegularFile>
+fabricTarget.minecraftArtifacts.intermediary.common   // Provider<RegularFile>
+fabricTarget.minecraftArtifacts.intermediary.client    // Provider<RegularFile>
+fabricTarget.minecraftArtifacts.intermediary.classpath // FileCollection
 
-// Query classpath for a specific namespace
-val classpath = fabricTarget.minecraftArtifacts.classpath("intermediary")
+// obf namespace also available
+fabricTarget.minecraftArtifacts.obf.common             // Provider<RegularFile>
+fabricTarget.minecraftArtifacts.obf.client             // Provider<RegularFile>
 
-// Check the default intermediary namespace
-val ns = fabricTarget.minecraftArtifacts.intermediaryNamespace // "intermediary" for Fabric, "srg" for Forge
+// Forge / NeoForge — searge namespace with a single merged jar
+val forgeTarget = cloche.targets.getByName("forge") as ForgeTarget
+
+forgeTarget.minecraftArtifacts.searge.jar              // Provider<RegularFile>
+forgeTarget.minecraftArtifacts.searge.classpath        // FileCollection
 ```
 
-Supported namespaces per target type:
+Available namespaces per target type:
 
-| Target | Namespaces | Distributions |
-|--------|-----------|--------------|
-| Fabric | `"obf"`, `"intermediary"` | `common`, `client` |
-| Forge / NeoForge | `"srg"` | `common` |
+| Target           | Provider Type              | Namespaces             | Distributions      |
+|------------------|----------------------------|------------------------|---------------------|
+| Fabric           | `FabricArtifactProvider`   | `obf`, `intermediary`  | `common`, `client`  |
+| Forge / NeoForge | `ForgeLikeArtifactProvider`| `searge`               | single merged jar   |
 
 ### Publishing and Consumption
 If you publish a library/mod API with Cloche, variants are automatically configured for consumers, thus if you use the library in common, it will automatically pick the right variants for each consuming target.

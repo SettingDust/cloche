@@ -11,6 +11,7 @@ import org.gradle.api.Action
 
 @JvmDefaultWithoutCompatibility
 interface FabricTarget : MinecraftTarget, FabricSecondarySourceSets, FabricCompilation {
+    override val minecraftArtifacts: FabricArtifactProvider
     override val metadata: FabricMetadata
 
     val client: LazyConfigurable<FabricSecondarySourceSets>
@@ -21,6 +22,7 @@ interface FabricTarget : MinecraftTarget, FabricSecondarySourceSets, FabricCompi
 
 @JvmDefaultWithoutCompatibility
 interface ForgeLikeTarget : MinecraftTarget, ForgeCompilation {
+    override val minecraftArtifacts: ForgeLikeArtifactProvider
     override val data: LazyConfigurable<ForgeCompilation>
     override val test: LazyConfigurable<ForgeCompilation>
 
