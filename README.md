@@ -78,6 +78,32 @@ A plethora of easily configurable features, including but not limited to:
 - Multi-platform utilities when using multiple targets, such as Java @Expect/@Actual annotations and Kotlin multiplatform features
   - Part of the [jvm-multiplatform](https://github.com/MsRandom/jvm-multiplatform) tool suite
 
+### Minecraft Artifact Provider
+Each `MinecraftTarget` exposes a `minecraftArtifacts` property (`MinecraftArtifactProvider`) that gives type-safe access to resolved Minecraft JARs and their classpath for different mapping namespaces.
+
+```kt
+// Access Minecraft JARs from any target
+val fabricTarget = cloche.targets.getByName("fabric") as FabricTarget
+
+// Query JARs by mapping namespace — returns Map<ModDistribution, Provider<RegularFile>>
+val intermediaryJars = fabricTarget.minecraftArtifacts.jars("intermediary")
+// intermediaryJars[ModDistribution.common] -> Provider<RegularFile>
+// intermediaryJars[ModDistribution.client] -> Provider<RegularFile>
+
+// Query classpath for a specific namespace
+val classpath = fabricTarget.minecraftArtifacts.classpath("intermediary")
+
+// Check the default intermediary namespace
+val ns = fabricTarget.minecraftArtifacts.intermediaryNamespace // "intermediary" for Fabric, "srg" for Forge
+```
+
+Supported namespaces per target type:
+
+| Target | Namespaces | Distributions |
+|--------|-----------|--------------|
+| Fabric | `"obf"`, `"intermediary"` | `common`, `client` |
+| Forge / NeoForge | `"srg"` | `common` |
+
 ### Publishing and Consumption
 If you publish a library/mod API with Cloche, variants are automatically configured for consumers, thus if you use the library in common, it will automatically pick the right variants for each consuming target.
 
