@@ -135,7 +135,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
+            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output), clientExtra),
             minecraftFile,
             data = false,
             test = false,
@@ -148,7 +148,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 ClochePlugin.DATA_COMPILATION_NAME,
                 this,
-                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
+                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output), clientExtra),
                 minecraftFile,
                 data = true,
                 test = false,
@@ -168,7 +168,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 SourceSet.TEST_SOURCE_SET_NAME,
                 this,
-                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
+                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output), clientExtra),
                 minecraftFile,
                 data = false,
                 test = true,
