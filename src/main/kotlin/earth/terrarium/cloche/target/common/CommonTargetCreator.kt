@@ -145,16 +145,20 @@ internal fun createCommonTarget(
                 sourceSet,
                 commonTarget.targetName == MinecraftModLoader.common.name || commonTarget.publish
             )
+        } else {
+            createExternalDependencyConfigurations(sourceSet)
         }
 
         configureSourceSet(sourceSet, commonTarget, compilation)
 
-        components.named("java") {
-            this as AdhocComponentWithVariants
+        if (!compilation.isTest) {
+            components.named("java") {
+                this as AdhocComponentWithVariants
 
-            addVariantsFromConfiguration(configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
-                // Common compilations are not runnable.
-                skip()
+                addVariantsFromConfiguration(configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
+                    // Common compilations are not runnable.
+                    skip()
+                }
             }
         }
 

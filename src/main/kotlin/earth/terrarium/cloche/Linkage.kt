@@ -200,13 +200,15 @@ internal fun TargetCompilation<*>.addClasspathDependency(dependency: TargetCompi
     sourceSet.compileClasspath += dependency.sourceSet.output
     sourceSet.runtimeClasspath += dependency.sourceSet.output
 
-    val dependencyVariant = configurations.named(dependency.sourceSet.runtimeElementsConfigurationName).flatMap {
-        it.outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME)
-    }
+    if (!isTest) {
+        val dependencyVariant = configurations.named(dependency.sourceSet.runtimeElementsConfigurationName).flatMap {
+            it.outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME)
+        }
 
-    configurations.named(sourceSet.runtimeElementsConfigurationName) {
-        outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME) {
-            artifacts.addAllLater(dependencyVariant.map(ConfigurationVariant::getArtifacts))
+        configurations.named(sourceSet.runtimeElementsConfigurationName) {
+            outgoing.variants.named(CLASSES_AND_RESOURCES_VARIANT_NAME) {
+                artifacts.addAllLater(dependencyVariant.map(ConfigurationVariant::getArtifacts))
+            }
         }
     }
 

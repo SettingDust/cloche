@@ -75,6 +75,10 @@ internal fun Project.createCompilationVariants(
         }
     }
 
+    createExternalDependencyConfigurations(sourceSet)
+}
+
+internal fun Project.createExternalDependencyConfigurations(sourceSet: SourceSet) {
     if (sourceSet.externalRuntimeConfigurationName !in configurations.names) {
         configurations.dependencyScope(sourceSet.externalRuntimeConfigurationName)
     }

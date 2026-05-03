@@ -34,8 +34,6 @@ import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
@@ -185,20 +183,22 @@ private fun TargetCompilation<*>.addDependencies() {
         extendModRuntimeClasspath()
     }
 
-    project.configurations.named(sourceSet.apiElementsConfigurationName) {
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.apiConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
+    if (!isTest) {
+        project.configurations.named(sourceSet.apiElementsConfigurationName) {
+            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.apiConfigurationName)))
+            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
 
-        extendsFrom(project.configurations.getByName(sourceSet.externalCompileConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
-    }
+            extendsFrom(project.configurations.getByName(sourceSet.externalCompileConfigurationName))
+            extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
+        }
 
-    project.configurations.named(sourceSet.runtimeElementsConfigurationName) {
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.implementationConfigurationName)))
+        project.configurations.named(sourceSet.runtimeElementsConfigurationName) {
+            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
+            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.implementationConfigurationName)))
 
-        extendsFrom(project.configurations.getByName(sourceSet.externalRuntimeConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
+            extendsFrom(project.configurations.getByName(sourceSet.externalRuntimeConfigurationName))
+            extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
+        }
     }
 
     project.configurations.named(remapClasspathConfiguration.name) {
@@ -213,6 +213,8 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
         if (!compilation.isTest) {
             createCompilationVariants(compilation, sourceSet, true)
+        } else {
+            createExternalDependencyConfigurations(sourceSet)
         }
 
         configureSourceSet(sourceSet, target, compilation)
