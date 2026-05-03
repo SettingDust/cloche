@@ -3,9 +3,9 @@ package earth.terrarium.cloche.target.fabric
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
+import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.DistributedNamespaceArtifacts
 import earth.terrarium.cloche.api.target.FabricArtifactProvider
-import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.FabricTarget
 import earth.terrarium.cloche.api.target.compilation.FabricIncludedClient
 import earth.terrarium.cloche.modId
@@ -249,6 +249,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     commonLibrariesConfiguration,
                     clientLibrariesConfiguration,
                     remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                    generateMappingsArtifact.flatMap(Zip::getArchiveFile),
                 )
             }
         }
@@ -415,8 +416,6 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
         main = registerCommonCompilation(SourceSet.MAIN_SOURCE_SET_NAME)
 
-        sourceSet.runtimeClasspath += project.files(generateMappingsArtifact.flatMap(Zip::getArchiveFile))
-
         commonLibrariesConfiguration.shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
         project.configurations.named(sourceSet.localImplementationConfigurationName) {
@@ -489,7 +488,9 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                 name == SourceSet.TEST_SOURCE_SET_NAME,
                 includedClient.isConfigured,
             ),
-        )
+        ).also {
+            it.sourceSet.runtimeClasspath += project.files(generateMappingsArtifact.flatMap(Zip::getArchiveFile))
+        }
     }
 
     override fun registerAccessWidenerMergeTask(compilation: CompilationInternal) {
