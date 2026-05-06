@@ -142,41 +142,51 @@ private fun TargetCompilation<*>.extendFromDependency(dependency: TargetCompilat
         }
 
         fun addDependsOn(target: ClocheTarget) {
-            target.dependsOn.configureEach {
-                this as CommonTargetInternal
+            val visited = mutableSetOf<CommonTargetInternal>()
 
-                modelDependencies.dependencies.add(project.dependencies.create(main.sourceSet.output.classesDirs))
+            fun collectRecursively(element: ClocheTarget) {
+                element.dependsOn.configureEach {
+                    this as CommonTargetInternal
 
-                when (this@extendFromDependency.name) {
-                    SourceSet.TEST_SOURCE_SET_NAME -> {
-                        test.onConfigured(::addCompilation)
-                    }
+                    if (!visited.add(this)) return@configureEach
 
-                    ClochePlugin.DATA_COMPILATION_NAME -> {
-                        data.onConfigured(::addCompilation)
-                    }
+                    modelDependencies.dependencies.add(project.dependencies.create(main.sourceSet.output.classesDirs))
 
-                    ClochePlugin.CLIENT_COMPILATION_NAME -> {
-                        client.onConfigured(::addCompilation)
-                    }
+                    when (this@extendFromDependency.name) {
+                        SourceSet.TEST_SOURCE_SET_NAME -> {
+                            test.onConfigured(::addCompilation)
+                        }
 
-                    ClochePlugin.CLIENT_TEST_COMPILATION_NAME -> {
-                        test.onConfigured(::addCompilation)
+                        ClochePlugin.DATA_COMPILATION_NAME -> {
+                            data.onConfigured(::addCompilation)
+                        }
 
-                        client.onConfigured {
-                            it.test.onConfigured(::addCompilation)
+                        ClochePlugin.CLIENT_COMPILATION_NAME -> {
+                            client.onConfigured(::addCompilation)
+                        }
+
+                        ClochePlugin.CLIENT_TEST_COMPILATION_NAME -> {
+                            test.onConfigured(::addCompilation)
+
+                            client.onConfigured {
+                                it.test.onConfigured(::addCompilation)
+                            }
+                        }
+
+                        ClochePlugin.CLIENT_DATA_COMPILATION_NAME -> {
+                            data.onConfigured(::addCompilation)
+
+                            client.onConfigured {
+                                it.data.onConfigured(::addCompilation)
+                            }
                         }
                     }
 
-                    ClochePlugin.CLIENT_DATA_COMPILATION_NAME -> {
-                        data.onConfigured(::addCompilation)
-
-                        client.onConfigured {
-                            it.data.onConfigured(::addCompilation)
-                        }
-                    }
+                    collectRecursively(this)
                 }
             }
+
+            collectRecursively(target)
         }
 
         addDependsOn(dependency.target)
@@ -252,6 +262,10 @@ internal fun CompilationInternal.addSourceDependency(dependency: CommonCompilati
     println("(source dependency) $this -> $dependency")
 
     sourceSet.extension<SourceSetStaticLinkageInfo>().link(dependency.sourceSet)
+
+    if (isIdeaDetected()) {
+        sourceSet.compileClasspath += project.files(dependency.sourceSet.output.classesDirs)
+    }
 
     sourceSet.extendConfigurations(dependency.sourceSet, true)
 

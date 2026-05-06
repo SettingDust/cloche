@@ -102,29 +102,33 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
 
                 with(project) {
                     target.data.onConfigured { data ->
-                        val dependency = dependency.setDependenciesWithData()
+                        val compilationDependency = dependency.setDependenciesWithData()
 
-                        data.addSourceDependency(dependency)
+                        data.addSourceDependency(dependency.main)
+                        data.addSourceDependency(compilationDependency)
                     }
 
                     target.test.onConfigured { test ->
-                        val dependency = dependency.setDependenciesWithTest()
+                        val compilationDependency = dependency.setDependenciesWithTest()
 
-                        test.addSourceDependency(dependency)
+                        test.addSourceDependency(dependency.main)
+                        test.addSourceDependency(compilationDependency)
                     }
 
                     if (target is FabricTargetImpl) {
                         target.client.onConfigured {
-                            val dependency = dependency.setDependenciesWithClient(it)
+                            val clientDependency = dependency.setDependenciesWithClient(it)
 
-                            it.addSourceDependency(dependency)
+                            it.addSourceDependency(clientDependency)
 
                             it.data.onConfigured { data ->
-                                data.addSourceDependency(dependency.data())
+                                data.addSourceDependency(dependency.main)
+                                data.addSourceDependency(clientDependency.data())
                             }
 
                             it.test.onConfigured { test ->
-                                test.addSourceDependency(dependency.test())
+                                test.addSourceDependency(dependency.main)
+                                test.addSourceDependency(clientDependency.test())
                             }
                         }
                     }
@@ -184,12 +188,14 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
                     add(commonTarget.main, dependency.main)
 
                     commonTarget.data.onConfigured { data ->
+                        add(data, dependency.main)
                         dependency.data.onConfigured { dependencyData ->
                             add(data, dependencyData)
                         }
                     }
 
                     commonTarget.test.onConfigured { test ->
+                        add(test, dependency.main)
                         dependency.test.onConfigured { dependencyTest ->
                             add(test, dependencyTest)
                         }
@@ -200,12 +206,14 @@ internal fun applyTargets(project: Project, cloche: ClocheExtension) {
                             add(client, dependencyClient)
 
                             commonTarget.data.onConfigured { data ->
+                                add(data, dependency.main)
                                 dependency.data.onConfigured { dependencyData ->
                                     add(data, dependencyData)
                                 }
                             }
 
                             commonTarget.test.onConfigured { test ->
+                                add(test, dependency.main)
                                 dependency.test.onConfigured { dependencyTest ->
                                     add(test, dependencyTest)
                                 }
