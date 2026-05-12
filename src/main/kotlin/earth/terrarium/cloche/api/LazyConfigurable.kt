@@ -6,6 +6,8 @@ import org.gradle.api.provider.Provider
 interface LazyConfigurable<out T : Any> {
     val value: Provider<@UnsafeVariance T>
 
+    fun onConfigured(action: (@UnsafeVariance T) -> Unit)
+
     operator fun invoke() = configure()
     operator fun invoke(action: Action<@UnsafeVariance T>) = configure(action)
 
