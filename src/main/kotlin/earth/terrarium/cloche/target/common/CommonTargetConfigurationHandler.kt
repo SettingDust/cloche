@@ -37,20 +37,36 @@ internal fun setupConfigurations(compilation: CommonCompilation) {
         addCollectedDependencies(compilation.dependencyHandler.modLocalImplementation)
     }
 
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME)) {
+    configurations.named(sourceSet.implementationConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.implementation)
     }
 
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.API_CONFIGURATION_NAME)) {
+    configurations.named(sourceSet.apiConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.api)
     }
 
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME)) {
+    configurations.named(sourceSet.compileOnlyConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.compileOnly)
     }
 
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_API_CONFIGURATION_NAME)) {
+    configurations.named(sourceSet.compileOnlyApiConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.compileOnlyApi)
+    }
+
+    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME)) {
+        extendsFrom(configurations.getByName(sourceSet.implementationConfigurationName))
+    }
+
+    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.API_CONFIGURATION_NAME)) {
+        extendsFrom(configurations.getByName(sourceSet.apiConfigurationName))
+    }
+
+    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME)) {
+        extendsFrom(configurations.getByName(sourceSet.compileOnlyConfigurationName))
+    }
+
+    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_API_CONFIGURATION_NAME)) {
+        extendsFrom(configurations.getByName(sourceSet.compileOnlyApiConfigurationName))
     }
 
     configurations.named(sourceSet.runtimeOnlyConfigurationName) {
