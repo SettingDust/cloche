@@ -3,7 +3,6 @@ package earth.terrarium.cloche.target.fabric
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.attributes.DependencyNamespaceAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.DistributedNamespaceArtifacts
 import earth.terrarium.cloche.api.target.FabricArtifactProvider
@@ -170,7 +169,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
 
     override val minecraftArtifacts = object : FabricArtifactProvider {
-        override val intermediaryNamespace = RemapNamespaceAttribute.INTERMEDIARY
+        override val intermediaryNamespace = DependencyNamespaceAttribute.INTERMEDIARY
 
         override val obf = object : DistributedNamespaceArtifacts {
             override val common = resolveCommonMinecraft.flatMap { it.output }

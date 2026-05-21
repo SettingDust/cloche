@@ -1,7 +1,7 @@
 package earth.terrarium.cloche.api.target
 
+import earth.terrarium.cloche.api.attributes.DependencyNamespaceAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.util.createLoaderDependency
 import earth.terrarium.cloche.util.maybeRegister
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
@@ -75,7 +75,7 @@ internal fun Project.createResolvePatchedMinecraftTask(
         this.universal.from(universalConfiguration)
         this.output.set(
             layout.buildDirectory.file(
-                "minecraft-resolution/$artifact-${loaderVersion.get()}-${RemapNamespaceAttribute.SEARGE}.jar"
+                "minecraft-resolution/$artifact-${loaderVersion.get()}-${DependencyNamespaceAttribute.SEARGE}.jar"
             )
         )
         this.neoforge.set(neoforge)

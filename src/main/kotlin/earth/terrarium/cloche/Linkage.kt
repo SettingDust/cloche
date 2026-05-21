@@ -1,11 +1,11 @@
 package earth.terrarium.cloche
 
 import earth.terrarium.cloche.api.target.ClocheTarget
-import earth.terrarium.cloche.target.CLASSES_AND_RESOURCES_VARIANT_NAME
 import earth.terrarium.cloche.target.REMAPPED_VARIANT_NAME
 import earth.terrarium.cloche.target.common.CommonTargetInternal
 import earth.terrarium.cloche.target.common.commonBucketConfigurationName
 import earth.terrarium.cloche.target.compilation.*
+import earth.terrarium.cloche.util.CLASSES_AND_RESOURCES_VARIANT_NAME
 import earth.terrarium.cloche.util.isIdeaDetected
 import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.virtualsourcesets.SourceSetStaticLinkageInfo

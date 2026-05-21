@@ -76,7 +76,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     }
 
     override val minecraftArtifacts = object : ForgeLikeArtifactProvider {
-        override val intermediaryNamespace = RemapNamespaceAttribute.SEARGE
+        override val intermediaryNamespace = DependencyNamespaceAttribute.SEARGE
 
         override val searge = object : NamespaceArtifacts {
             override val jar = resolvePatchedMinecraft.flatMap { it.output }
