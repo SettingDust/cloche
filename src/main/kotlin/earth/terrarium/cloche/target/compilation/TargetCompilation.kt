@@ -107,6 +107,23 @@ private fun Project.getMappedClasspath(configurationName: String): FileCollectio
     })
 }
 
+private fun Project.getAccessWidenerClasspath(configurationName: String, remapped: Provider<Boolean>): FileCollection {
+    val classpath = project.configurations.named(configurationName)
+
+    return project.files(classpath.map { classpath ->
+        classpath.incoming.artifactView {
+            componentFilter {
+                it !is ProjectComponentIdentifier
+            }
+
+            attributes {
+                attributeProvider(REMAPPED_ATTRIBUTE, remapped)
+                attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            }
+        }.artifacts.artifactFiles
+    })
+}
+
 data class FinalJarTasks(
     val accessWidenTask: TaskProvider<AccessWiden>,
     val decompileTask: TaskProvider<Decompile>,
@@ -132,6 +149,10 @@ internal fun registerCompilationTransformations(
     val collapsedName = compilationName.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals)
 
     val project = target.project
+    val accessWidenerClasspath = project.getAccessWidenerClasspath(
+        sourceSet.compileClasspathConfigurationName,
+        target.minecraftVersion.map { !isUnobfuscatedVersion(it) },
+    )
 
     val accessWidenTask = project.tasks.register<AccessWiden>(
         lowerCamelCaseGradleName(
@@ -150,12 +171,13 @@ internal fun registerCompilationTransformations(
 
         with(project) {
             // TODO Export access wideners as a separate artifact
-            accessWideners.from(getRelevantSyncArtifacts(sourceSet.compileClasspathConfigurationName))
+            accessWideners.from(accessWidenerClasspath)
         }
 
         outputFile.set(outputDirectory.zip(namedMinecraftFile) { dir, file ->
             dir.file(file.asFile.name)
         })
+
     }
 
     val mixinTask = project.tasks.register<Mixin>(

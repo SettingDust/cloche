@@ -278,7 +278,23 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
     }
 
+    private val namedCommonJar = minecraftRemapNamespace.flatMap {
+        if (it.isEmpty()) {
+            resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
+        } else {
+            remapCommon.flatMap(RemapTask::outputFile)
+        }
+    }
+
     private val clientJar = minecraftRemapNamespace.flatMap {
+        if (it.isEmpty()) {
+            resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
+        } else {
+            remapClient.flatMap(RemapTask::outputFile)
+        }
+    }
+
+    private val namedClientJar = minecraftRemapNamespace.flatMap {
         if (it.isEmpty()) {
             resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
         } else {
@@ -316,8 +332,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     ClochePlugin.CLIENT_COMPILATION_NAME,
                     this,
                     intermediaryClasspath,
-                    commonJar,
-                    clientJar,
+                    namedCommonJar,
+                    namedClientJar,
                     main.finalMinecraftFile,
                     data = false,
                     test = false,
@@ -467,7 +483,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             this,
             lowerCamelCaseGradleName(name.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals), "common"),
             project.compilationSourceSet(this, name),
-            commonJar,
+            namedCommonJar,
             project.provider { emptyList() },
             project.provider { ModDistribution.common }
         )
@@ -481,8 +497,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                 name,
                 this,
                 intermediaryClasspath,
-                commonJar,
-                clientJar,
+                namedCommonJar,
+                namedClientJar,
                 commonTasks.accessWidenTask.flatMap(AccessWiden::outputFile),
                 name == ClochePlugin.DATA_COMPILATION_NAME,
                 name == SourceSet.TEST_SOURCE_SET_NAME,
