@@ -118,7 +118,7 @@ private fun Project.getAccessWidenerClasspath(configurationName: String, remappe
 
             attributes {
                 attributeProvider(REMAPPED_ATTRIBUTE, remapped)
-                attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                attribute(RemapNamespaceAttribute.ATTRIBUTE, "named")
             }
         }.artifacts.artifactFiles
     })
