@@ -106,6 +106,9 @@ internal abstract class MinecraftTargetInternal(
 
     internal val mappings = MappingsBuilder(this, project)
 
+    internal val sourceNamespaces: DomainObjectCollection<String> =
+        project.objects.domainObjectSet(String::class)
+
     @Suppress("UNCHECKED_CAST")
     private val mappingActions =
         project.objects.domainObjectSet(Action::class) as DomainObjectCollection<Action<MappingsBuilder>>

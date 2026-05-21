@@ -7,15 +7,12 @@ import earth.terrarium.cloche.api.target.compilation.Compilation
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
-import net.msrandom.minecraftcodev.core.utils.zipFileSystem
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
 import net.msrandom.minecraftcodev.forge.RemoveNameMappingService
 import net.msrandom.minecraftcodev.forge.task.GenerateMcpToSrg
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.provider.Provider
-import org.gradle.api.tasks.Internal
-import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
@@ -23,18 +20,9 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
 import java.io.File
 import javax.inject.Inject
-import kotlin.io.path.exists
 
 internal abstract class ForgeTargetImpl @Inject constructor(name: String) : ForgeLikeTargetImpl(name), ForgeTarget {
     override val runs = objectFactory.newInstance<LexForgeRunConfigurations>(this)
-
-    override val group
-        @Internal
-        get() = "net.minecraftforge"
-
-    override val artifact
-        @Internal
-        get() = "forge"
 
     override val minecraftRemapNamespace: Provider<String>
         get() = providerFactory.provider { MinecraftCodevForgePlugin.SRG_MAPPINGS_NAMESPACE }
@@ -46,6 +34,9 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
     }
 
     init {
+        group.convention("net.minecraftforge")
+        artifact.convention("forge")
+
         project.dependencies.add(minecraftLibrariesConfiguration.name, "net.msrandom:codev-forge-runtime:0.1.1")
 
         removeNameMappingService(main)

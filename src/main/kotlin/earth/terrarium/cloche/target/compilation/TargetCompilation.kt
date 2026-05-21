@@ -1,11 +1,14 @@
 package earth.terrarium.cloche.target.compilation
 
-import earth.terrarium.cloche.*
+import earth.terrarium.cloche.ClocheTargetAttribute
+import earth.terrarium.cloche.INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE
+import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
+import earth.terrarium.cloche.api.attributes.DependencyNamespaceAttribute
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.ClocheTarget
+import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.util.fromJars
@@ -118,7 +121,7 @@ private fun Project.getAccessWidenerClasspath(configurationName: String, remappe
 
             attributes {
                 attributeProvider(REMAPPED_ATTRIBUTE, remapped)
-                attribute(RemapNamespaceAttribute.ATTRIBUTE, "named")
+                attribute(DependencyNamespaceAttribute.ARTIFACT, DependencyNamespaceAttribute.NAMED)
             }
         }.artifacts.artifactFiles
     })
@@ -245,96 +248,75 @@ private fun setupModTransformationPipeline(
     target: MinecraftTargetInternal,
     compilation: TargetCompilation<*>,
 ) {
-    // afterEvaluate needed as the registration of a transform is dependent on a lazy provider
-    project.afterEvaluate {
-        for (remapNamespace in target.mappings.remapNamespaces.get()) {
-            val namespace =
-                remapNamespace.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
+    val registeredNamespaces = mutableSetOf<String>()
 
-            // When modRemapNamespace is empty, default deps don't need remapping.
-            // Register NoopAction to provide an exact match (namespace=INITIAL) so that
-            // default deps pass through, while cross-namespace deps (e.g., INTERMEDIARY)
-            // still get remapped via RemapAction.
-            if (namespace.isEmpty()) {
-                project.dependencies.registerTransform(NoopAction::class) {
-                    from
-                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                        .attribute(REMAPPED_ATTRIBUTE, false)
-                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                        .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+    fun registerNamespace(namespace: String) {
+        if (!registeredNamespaces.add(namespace)) return
+        if (namespace == DependencyNamespaceAttribute.NAMED) return
 
-                    to
-                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                        .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+        project.dependencies.registerTransform(RemapAction::class) {
+            from
+                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                .attribute(REMAPPED_ATTRIBUTE, false)
+                .attribute(DependencyNamespaceAttribute.ARTIFACT, namespace)
+                .attribute(DependencyNamespaceAttribute.SOURCE, namespace)
+                .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                    compilation.baseAttributes(from)
-                    compilation.baseAttributes(to)
-                }
+            to
+                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                .attribute(REMAPPED_ATTRIBUTE, true)
+                .attribute(DependencyNamespaceAttribute.ARTIFACT, DependencyNamespaceAttribute.NAMED)
+                .attribute(DependencyNamespaceAttribute.SOURCE, namespace)
+                .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
-                continue
-            }
+            // TODO Is the usage of the base attributes correct here?
+            compilation.baseAttributes(from)
+            compilation.baseAttributes(to)
 
-            project.dependencies.registerTransform(RemapAction::class) {
-                from
-                    .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                    .attribute(REMAPPED_ATTRIBUTE, false)
-                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                    .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+            parameters {
+                val compileClasspath =
+                    project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
 
-                to
-                    .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                    .attribute(REMAPPED_ATTRIBUTE, true)
-                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
-                    .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+                val runtimeClasspath =
+                    project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                // TODO Is the usage of the base attributes correct here?
-                compilation.baseAttributes(from)
-                compilation.baseAttributes(to)
+                val nonModCompileClasspath =
+                    project.getNonModFiles(compilation.sourceSet.compileClasspathConfigurationName)
 
-                parameters {
-                    val compileClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
+                val nonModRuntimeClasspath =
+                    project.getNonModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                    val runtimeClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
+                val modCompileClasspath =
+                    project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
 
-                    val remapClasspath =
-                        project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name)
+                val modRuntimeClasspath =
+                    project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
 
-                    val nonModCompileClasspath =
-                        project.getNonModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                val remapClasspath =
+                    project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name)
 
-                    val nonModRuntimeClasspath =
-                        project.getNonModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
 
-                    val modCompileClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                sourceNamespace.set(namespace)
+                targetNamespace.set(DependencyNamespaceAttribute.NAMED)
 
-                    val modRuntimeClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
+                extraClasspath.from(compileClasspath)
+                extraClasspath.from(runtimeClasspath)
 
-                    mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
+                cacheDirectory.set(getGlobalCacheDirectory(project))
 
-                    sourceNamespace.set(namespace)
+                nonModFiles.from(nonModCompileClasspath)
+                nonModFiles.from(nonModRuntimeClasspath)
 
-                    extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
-                    extraClasspath.from(remapClasspath)
-                    extraClasspath.from(compileClasspath)
-                    extraClasspath.from(runtimeClasspath)
-
-                    cacheDirectory.set(getGlobalCacheDirectory(project))
-
-                    nonModFiles.from(nonModCompileClasspath)
-                    nonModFiles.from(nonModRuntimeClasspath)
-
-                    modFiles.from(modCompileClasspath)
-                    modFiles.from(modRuntimeClasspath)
-                }
+                modFiles.from(modCompileClasspath)
+                modFiles.from(modRuntimeClasspath)
             }
         }
     }
+
+    target.sourceNamespaces.all(::registerNamespace)
+    target.mappings.sourceNamespaces.all(::registerNamespace)
 }
 
 internal open class TargetCompilationInfo<T : MinecraftTargetInternal>(
@@ -509,12 +491,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         )
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-            attributes.attributeProvider(
-                REMAPPED_ATTRIBUTE,
-                _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(DependencyNamespaceAttribute.ARTIFACT, DependencyNamespaceAttribute.NAMED)
 
             extendsFrom(
                 target.mappingsBuildDependenciesHolder,
@@ -524,12 +503,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-            attributes.attributeProvider(
-                REMAPPED_ATTRIBUTE,
-                _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(DependencyNamespaceAttribute.ARTIFACT, DependencyNamespaceAttribute.NAMED)
 
             extendsFrom(
                 target.mappingsBuildDependenciesHolder,

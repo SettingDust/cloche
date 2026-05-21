@@ -1,0 +1,367 @@
+plan_id: 20260522-merge-specific-commits
+objective: 合并两个指定提交 d302c31488228dfc10f7a16a1f81ae504c04ff8f、1ff83a1ec16c6b65fc3c5afc0b16fc37c5f0a10f 到当前分支，并保证 README.md 不被修改。
+created_at: "2026-05-22"
+created_by: gem-planner
+status: pending
+research_confidence: high
+plan_metrics:
+  wave_1_task_count: 1
+  total_dependencies: 3
+  risk_score: low
+tldr: |
+  两个提交只存在于 cloche 仓库；先保护当前工作树和 README.md，再按历史顺序 cherry-pick 1ff83a1 后 d302c31。每次合入后显式恢复 README.md 并验证状态。
+open_questions: []
+gaps: []
+pre_mortem:
+  overall_risk_level: low
+  critical_failure_modes:
+    - scenario: 当前工作树存在未跟踪 docs/，cherry-pick 前未确认无相关脏改导致混入变更。
+      likelihood: medium
+      impact: medium
+      mitigation: 在执行前运行 git status --short，并只在确认无影响或已由用户处理后继续；不删除或重置未知文件。
+    - scenario: d302c31 修改 README.md，cherry-pick 后 README.md 被带入变更。
+      likelihood: medium
+      impact: medium
+      mitigation: cherry-pick 后立即用当前分支基线恢复 README.md，并用 git diff -- README.md 验证为空。
+  assumptions:
+    - 当前分支指 cloche 仓库的当前分支 feature/merged-mapping。
+    - 用户要求“不修改文件”仅适用于本计划阶段；后续执行合并需获得执行授权。
+    - 合并方式采用 cherry-pick，因为目标是把两个指定提交移入当前分支。
+implementation_specification:
+  code_structure: 不改业务代码；仅规划后续 Git 操作顺序和验证门禁。
+  affected_areas:
+    - cloche Git history
+    - README.md protection
+    - Gradle/Kotlin source files touched by source commits
+  component_details:
+    - component: Repository detection
+      responsibility: 确认两个提交所在仓库和当前目标分支。
+      interfaces:
+        - git cat-file -t <sha>
+        - git log --oneline -1 <sha>
+      dependencies: []
+      integration_points:
+        - d:/Projects/Minecraft/cloche
+    - component: README guard
+      responsibility: 在合并前后确保 README.md 无最终差异。
+      interfaces:
+        - git diff -- README.md
+        - git restore --source=HEAD -- README.md
+      dependencies:
+        - component: Repository detection
+          relationship: 只在确认目标仓库后执行
+      integration_points:
+        - README.md
+    - component: Cherry-pick sequence
+      responsibility: 按祖先到后代顺序合入 1ff83a1 后 d302c31，并处理冲突。
+      interfaces:
+        - git cherry-pick <sha>
+        - git status --short
+      dependencies:
+        - component: README guard
+          relationship: 每个提交后执行保护验证
+      integration_points:
+        - src/main/kotlin/earth/terrarium/cloche
+contracts:
+  - from_task: T1-inspect-commits-and-tree
+    to_task: T2-prepare-readme-guard
+    interface: commit_location_report
+    format: "repo_path, ordered_commits, readme_touched_by_commit, dirty_status"
+  - from_task: T2-prepare-readme-guard
+    to_task: T3-cherry-pick-commits
+    interface: safe_start_gate
+    format: "README diff empty; unrelated dirty files acknowledged or absent"
+  - from_task: T3-cherry-pick-commits
+    to_task: T4-verify-final-state
+    interface: merge_result
+    format: "cherry-pick exit status, conflict status, README diff status"
+tasks:
+  - id: T1-inspect-commits-and-tree
+    title: 检查提交所属仓库和当前工作树
+    description: 确认两个提交只存在于 cloche，并记录当前分支、脏树和每个提交触及的文件。
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - 检查提交所属仓库
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: d:/Projects/Minecraft/cloche
+        description: 目标仓库；两个提交均存在。
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: 初始计划
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: git
+    verification:
+      - git cat-file -t d302c31488228dfc10f7a16a1f81ae504c04ff8f
+      - git cat-file -t 1ff83a1ec16c6b65fc3c5afc0b16fc37c5f0a10f
+      - git status --short
+    acceptance_criteria:
+      - 两个提交在 cloche 中解析为 commit。
+      - jvm-multiplatform 和 minecraft-codev 不作为目标仓库。
+      - 记录 d302c31 会修改 README.md，1ff83a1 不修改 README.md。
+    success_criteria:
+      - commit_presence.cloche.both === true
+      - target_repo === "d:/Projects/Minecraft/cloche"
+    failure_modes:
+      - scenario: 当前仓库判断错误导致在错误项目执行合并。
+        likelihood: low
+        impact: high
+        mitigation: 执行前使用 git rev-parse --show-toplevel 和 git cat-file 双重确认。
+    tech_stack:
+      - Git
+      - PowerShell
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - 两个提交已确认只在 cloche 中存在。
+      required_test_first: 不需要测试优先；此任务只读检查。
+      target_files: []
+      minimal_change: 不修改文件。
+      acceptance_checks:
+        - git status --short
+    research_sources:
+      - terminal-readonly-git-inspection-2026-05-22
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+  - id: T2-prepare-readme-guard
+    title: 建立 README.md 保护门禁
+    description: 在合并前确认 README.md 没有本地差异；如存在差异则阻塞并请求用户决策。记录 README.md 当前 HEAD 作为恢复基线。
+    wave: 2
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - 保护 README
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - T1-inspect-commits-and-tree
+    conflicts_with: []
+    context_files:
+      - path: d:/Projects/Minecraft/cloche/README.md
+        description: 必须保持最终不变的文件。
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: 初始计划
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 1
+    estimated_lines: 0
+    focus_area: git
+    verification:
+      - git diff -- README.md
+      - git diff --cached -- README.md
+    acceptance_criteria:
+      - 合并开始前 README.md 工作区和暂存区均无差异。
+      - 若 README.md 有用户改动，不自动覆盖。
+    success_criteria:
+      - readme_pre_diff.empty === true
+      - readme_cached_diff.empty === true
+    failure_modes:
+      - scenario: README.md 已有用户改动，被后续恢复命令覆盖。
+        likelihood: low
+        impact: high
+        mitigation: 若预检发现 README.md 差异，停止执行并询问用户。
+    tech_stack:
+      - Git
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - d302c31 会触及 README.md，必须显式保护。
+      required_test_first: 不适用。
+      target_files:
+        - README.md
+      minimal_change: 不修改 README.md；仅在后续执行中用 HEAD 恢复 cherry-pick 引入的 README.md 差异。
+      acceptance_checks:
+        - git diff -- README.md 为空
+    research_sources:
+      - terminal-readonly-git-inspection-2026-05-22
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+  - id: T3-cherry-pick-commits
+    title: 按顺序 cherry-pick 两个提交并处理冲突
+    description: 先合入 1ff83a1ec16c6b65fc3c5afc0b16fc37c5f0a10f，再合入 d302c31488228dfc10f7a16a1f81ae504c04ff8f；发生冲突时只解决相关源文件和 gradle.properties，README.md 始终恢复为合并前版本。
+    wave: 3
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - cherry-pick/merge
+      - 冲突处理
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - T2-prepare-readme-guard
+    conflicts_with: []
+    context_files:
+      - path: d:/Projects/Minecraft/cloche/src/main/kotlin/earth/terrarium/cloche/api/target/MinecraftArtifactProvider.kt
+        description: 两个提交共同触及的 API 文件，可能冲突。
+      - path: d:/Projects/Minecraft/cloche/src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt
+        description: 两个提交共同触及的 Fabric 实现。
+      - path: d:/Projects/Minecraft/cloche/src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt
+        description: 两个提交共同触及的 Forge-like 实现。
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: 初始计划
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 3
+    estimated_lines: 250
+    focus_area: git
+    verification:
+      - git cherry-pick 1ff83a1ec16c6b65fc3c5afc0b16fc37c5f0a10f
+      - git restore --source=HEAD -- README.md
+      - git cherry-pick d302c31488228dfc10f7a16a1f81ae504c04ff8f
+      - git restore --source=HEAD -- README.md
+      - git status --short
+    acceptance_criteria:
+      - 两个提交的非 README 变更被合入当前分支。
+      - README.md 无工作区或暂存区差异。
+      - 若出现冲突，冲突文件中无 conflict markers 后才继续。
+    success_criteria:
+      - cherry_pick_results.failed === 0
+      - readme_final_diff.empty === true
+      - conflict_markers.count === 0
+    failure_modes:
+      - scenario: 两个提交依赖顺序错误导致第二个提交冲突扩大。
+        likelihood: low
+        impact: medium
+        mitigation: 按旧到新顺序先 1ff83a1 后 d302c31。
+      - scenario: README.md 在 cherry-pick 提交阶段被暂存。
+        likelihood: medium
+        impact: medium
+        mitigation: 每次 cherry-pick 后检查并恢复 README.md，再检查 git diff --cached -- README.md。
+    tech_stack:
+      - Git
+      - Kotlin
+      - Gradle Kotlin DSL
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - 目标提交顺序为 1ff83a1 后 d302c31。
+      required_test_first: 不适用；此任务是版本控制合入。
+      target_files:
+        - src/main/kotlin/earth/terrarium/cloche/api/target/MinecraftArtifactProvider.kt
+        - src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt
+        - src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt
+      minimal_change: 仅接受指定提交带来的非 README 变更和必要冲突解决。
+      acceptance_checks:
+        - git diff -- README.md 为空
+        - git diff --cached -- README.md 为空
+        - git status --short 不显示未解决冲突
+    research_sources:
+      - terminal-readonly-git-inspection-2026-05-22
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: true
+    devops_security_sensitive: false
+  - id: T4-verify-final-state
+    title: 验证合并结果和仓库状态
+    description: 验证两个目标提交的效果已进入当前分支，README.md 未修改，仓库无未解决冲突，并运行适合 cloche 的轻量验证。
+    wave: 4
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - 验证状态
+    priority: medium
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - T3-cherry-pick-commits
+    conflicts_with: []
+    context_files:
+      - path: d:/Projects/Minecraft/cloche/build.gradle.kts
+        description: Gradle 项目入口，用于选择验证任务。
+      - path: d:/Projects/Minecraft/cloche/gradlew.bat
+        description: Windows Gradle wrapper。
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: 初始计划
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: verification
+    verification:
+      - git diff -- README.md
+      - git diff --cached -- README.md
+      - git status --short
+      - .\\gradlew.bat test --console plain
+    acceptance_criteria:
+      - README.md 未出现在 git diff、git diff --cached 或最终状态中。
+      - 无未合并路径。
+      - Gradle 测试通过，或若环境失败则记录非代码原因。
+    success_criteria:
+      - readme_final_diff.empty === true
+      - unmerged_paths.count === 0
+      - test_results.failed === 0
+    failure_modes:
+      - scenario: 测试因本地 JDK/Gradle 环境失败而非合并逻辑失败。
+        likelihood: medium
+        impact: low
+        mitigation: 记录命令、错误摘要和环境信息，不用破坏性命令修复环境。
+    tech_stack:
+      - Git
+      - Gradle
+      - Kotlin
+    test_coverage: Gradle test
+    implementation_handoff:
+      do_not_reinvestigate:
+        - README.md 是最终状态硬性约束。
+      required_test_first: 不适用。
+      target_files: []
+      minimal_change: 只验证，不改文件。
+      acceptance_checks:
+        - git diff -- README.md 为空
+        - git diff --cached -- README.md 为空
+        - git status --short 无冲突标记
+        - gradlew.bat test --console plain 通过
+    research_sources:
+      - terminal-readonly-git-inspection-2026-05-22
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+extra:
+  prd_update_recommended: false
+  prd_update_reason: null
+patterns_found:
+  - name: clean-git-gate-before-cherry-pick
+    description: 合入指定提交前先确认目标仓库、提交存在性和工作树状态，避免跨仓库或脏树误操作。
+    confidence: 0.95
+  - name: protected-file-restore-after-cherry-pick
+    description: 对被源提交触及但禁止最终修改的文件，在每次 cherry-pick 后执行差异检查和基线恢复。
+    confidence: 0.9

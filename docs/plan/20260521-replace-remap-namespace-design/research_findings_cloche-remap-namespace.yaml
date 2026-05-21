@@ -1,0 +1,526 @@
+plan_id: 20260521-replace-remap-namespace-design
+objective: 实现替换 cloche 原有 RemapNamespaceAttribute 方案；不兼容旧方案；mapping 自带 namespace graph；loader 默认 source namespace；MC 26 不需要反混淆；target 通常 named
+focus_area: cloche RemapNamespaceAttribute API/schema、MappingsBuilder、TargetCompilation、GenericMinecraftRemapTasks 实施点
+created_at: 2026-05-21
+created_by: gem-researcher
+status: completed
+tldr: |
+  - 当前方案用 Gradle 属性 earth.terrarium.cloche.remapNamespace 标记依赖输入 namespace，并用 REMAPPED_ATTRIBUTE 表示是否已转到目标 namespace。
+  - MappingsBuilder 同时负责映射依赖和可 remap namespace 列表，默认加入 INITIAL(none) 与 OBF(obf)，Fabric/Forge helper 追加 intermediary/srg。
+  - TargetCompilation 的依赖 transform 管线把 INITIAL 解析为 target.modRemapNamespace，把所有输入 remap 到 named（RemapAction 默认 targetNamespace=named）。
+  - Minecraft 自身 remap 仍硬编码 obf/intermediary/srg/named 路径；GenericMinecraftRemapTasks 通过注册 provider/classpath 支持按 namespace 取得或生成 Minecraft jar。
+  - 最小替换策略是引入新的 namespace schema/attribute 表达 source/target namespace 与 mapping graph，保留 REMAPPED_ATTRIBUTE 语义或同步替换 variant 选择，删除 INITIAL 哨兵与旧 remapNamespace API。
+research_metadata:
+  methodology: semantic_search + grep_search + targeted read_file over cloche and minecraft-codev remapper internals
+  scope: d:/Projects/Minecraft/cloche remap namespace API/schema, MappingsBuilder, TargetCompilation, GenericMinecraftRemapTasks; selected minecraft-codev remapper behavior for graph assumptions
+  confidence: high
+  coverage: 88
+  decision_blockers: 1
+  research_blockers: 0
+files_analyzed:
+  - file: Attributes.kt
+    path: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt
+    purpose: public Gradle attribute constants and legacy namespace constants
+    key_elements:
+      - element: RemapNamespaceAttribute.ATTRIBUTE
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt:86
+        description: current String Gradle attribute earth.terrarium.cloche.remapNamespace used to tag dependency source namespace
+        language: Kotlin
+      - element: RemapNamespaceAttribute.INITIAL
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt:88
+        description: legacy sentinel value none; TargetCompilation interprets it as target.modRemapNamespace for sourceNamespace but keeps attribute value INITIAL on incoming dependencies
+        language: Kotlin
+      - element: RemapNamespaceAttribute.OBF/SEARGE/INTERMEDIARY
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt:89-91
+        description: public namespace constants exposed to build scripts and internal remap provider registration
+        language: Kotlin
+    lines: 92
+  - file: MappingsBuilder.kt
+    path: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt
+    purpose: mapping dependency DSL and namespace registration state
+    key_elements:
+      - element: remapNamespaces
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:64-68
+        description: ListProperty<String> defaults to empty convention then adds INITIAL and OBF, driving transform registration afterEvaluate
+        language: Kotlin
+      - element: fabricIntermediary
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:150-157
+        description: adds intermediary namespace and Fabric intermediary mappings dependency
+        language: Kotlin
+      - element: mcpSearge/legacyMcpSearge/neoforgeSearge
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:160-188
+        description: add srg namespace and Forge/NeoForge mapping dependencies
+        language: Kotlin
+      - element: MinecraftTarget.remapNamespace
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:193-195
+        description: extension DSL that appends arbitrary namespace; likely removed/replaced for incompatible new API
+        language: Kotlin
+    lines: 225
+  - file: TargetCompilation.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+    purpose: compilation classpath attributes, dependency remap transform registration, final mod jar remap
+    key_elements:
+      - element: setupModTransformationPipeline
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:176-255
+        description: afterEvaluate loop over target.mappings.remapNamespaces; registers NoopAction for empty namespace and RemapAction from REMAPPED=false/namespace=INITIAL to REMAPPED=true/namespace=remapNamespace
+        language: Kotlin
+      - element: RemapAction.parameters.sourceNamespace
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:244-246
+        description: sourceNamespace is set to namespace resolved from remapNamespace or target.modRemapNamespace; target namespace is not set so RemapAction defaults to named
+        language: Kotlin
+      - element: remapJarTask
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:347-362
+        description: remaps project jar from named to target.modRemapNamespace for publication/include when modRemapNamespace is non-empty
+        language: Kotlin
+      - element: compile/runtime classpath attributes
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:405-425
+        description: classpaths request REMAPPED_ATTRIBUTE provider !isUnobfuscatedVersion and RemapNamespaceAttribute.INITIAL
+        language: Kotlin
+      - element: registerCompilationTransformations
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:105-149
+        description: access widening/decompilation assumes named namespace for final Minecraft file and uses isUnobfuscatedVersion as namedSource signal
+        language: Kotlin
+    lines: 460
+  - file: GenericMinecraftRemapTasks.kt
+    path: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt
+    purpose: registry and fallback generator for Minecraft jars by namespace
+    key_elements:
+      - element: DefinedMinecraftProviders.init
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt:46-82
+        description: registers Fabric providers for obf/intermediary and ForgeLike provider for srg; classpaths keyed by namespace
+        language: Kotlin
+      - element: getRemappedMinecraftByNamespace
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt:142-201
+        description: returns existing intermediary classpath if requested namespace equals minecraftRemapNamespace; otherwise uses provider or remaps from intermediaryNamespace to requested namespace
+        language: Kotlin
+      - element: intermediaryNamespace fallback
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt:155-158
+        description: defaults Fabric to intermediary and ForgeLike to srg when minecraftRemapNamespace is empty
+        language: Kotlin
+    lines: 201
+  - file: MinecraftTargetInternal.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt
+    purpose: common target mapping task, namespace providers, mapping action application
+    key_elements:
+      - element: modRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt:50-51
+        description: default publication/dependency source namespace provider delegates to minecraftRemapNamespace
+        language: Kotlin
+      - element: minecraftRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt:53-54
+        description: abstract provider used by Minecraft resolution/remap tasks as loader/source namespace
+        language: Kotlin
+      - element: loadMappingsTask
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt:56-61
+        description: LoadMappings task consumes sourceSet.mappingsConfigurationName and emits mapping tree used by all remap tasks/transforms
+        language: Kotlin
+      - element: mappingsBuildDependenciesHolder
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt:63-76
+        description: adds loadMappings build dependency only when minecraftRemapNamespace is non-empty
+        language: Kotlin
+    lines: 162
+  - file: FabricTargetImpl.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt
+    purpose: Fabric target Minecraft resolution/remap defaults and run remap classpath
+    key_elements:
+      - element: remapCommonMinecraftIntermediary/remapClientMinecraftIntermediary
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt:113-158
+        description: remap official obf Minecraft jars to minecraftRemapNamespace, named intermediary in task names/output
+        language: Kotlin
+      - element: remapCommon/remapClient
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt:160-194
+        description: remap from minecraftRemapNamespace to named for compile/decompile final Minecraft jars
+        language: Kotlin
+      - element: writeRemapClasspathTask
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt:215-230
+        description: run support writes libraries and intermediary jar when minecraftRemapNamespace is non-empty; mapping zip currently disabled in read version
+        language: Kotlin
+      - element: minecraftRemapNamespace/modRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt:342-357
+        description: Fabric defaults to intermediary except unobfuscated official-compatible/default MC versions yield empty namespace
+        language: Kotlin
+      - element: mappings.fabricIntermediary
+        type: function
+        location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt:394
+        description: target init adds Fabric intermediary mappings and registers mappings
+        language: Kotlin
+    lines: 420
+  - file: ForgeLikeTargetImpl.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt
+    purpose: shared Forge/NeoForge Minecraft patch/remap flow
+    key_elements:
+      - element: resolvePatchedMinecraft
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt:57-72
+        description: patched Minecraft output namespace is minecraftRemapNamespace or named when empty
+        language: Kotlin
+      - element: remapTask
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt:88-101
+        description: remaps patched Minecraft from minecraftRemapNamespace to named for final compilation input
+        language: Kotlin
+      - element: minecraftFile
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt:103-109
+        description: uses patched Minecraft directly when namespace empty, otherwise named remap output
+        language: Kotlin
+    lines: 180
+  - file: ForgeTargetImpl.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/forge/lex/ForgeTargetImpl.kt
+    purpose: legacy Forge target namespace defaults
+    key_elements:
+      - element: minecraftRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/lex/ForgeTargetImpl.kt:32-34
+        description: always SRG namespace for Forge target
+        language: Kotlin
+      - element: generateMcpToSrg
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/lex/ForgeTargetImpl.kt:36-40
+        description: generates MCP-to-SRG mapping artifact from loaded mappings for runtime
+        language: Kotlin
+    lines: 80
+  - file: NeoForgeTargetImpl.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt
+    purpose: NeoForge target namespace defaults and MC 26 behavior
+    key_elements:
+      - element: minecraftRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt:37-44
+        description: default mappings yield empty namespace; configured non-default mappings use SRG
+        language: Kotlin
+      - element: modRemapNamespace
+        type: variable
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt:46-53
+        description: official-compatible mappings yield empty namespace; incompatible mappings use SRG
+        language: Kotlin
+      - element: localImplementation forgeDependency
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt:75-85
+        description: for unobfuscated versions adds loader dependency directly; confirms MC 26/no-deobf path is already represented by empty namespace branches
+        language: Kotlin
+    lines: 110
+  - file: TargetHandler.kt
+    path: src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt
+    purpose: outgoing variants and publication artifact wiring
+    key_elements:
+      - element: remappedVariant/includesStrippedVariant
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt:274-293
+        description: outgoing variants carry REMAPPED_ATTRIBUTE=true and include transform state, but no RemapNamespaceAttribute currently set in read span
+        language: Kotlin
+      - element: classes/resources variants
+        type: pattern
+        location: src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt:304-309
+        description: class/resource variants also marked remapped=true without namespace attribute
+        language: Kotlin
+    lines: 131
+  - file: LoadMappings.kt
+    path: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/LoadMappings.kt
+    purpose: loaded mapping graph output behavior
+    key_elements:
+      - element: LoadMappings.load
+        type: function
+        location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/LoadMappings.kt:48-54
+        description: loads all mapping files into MemoryMappingTree and writes tiny v2 output; graph namespaces come from mapping resolution rules
+        language: Kotlin
+    lines: 54
+  - file: RemapTask.kt
+    path: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/RemapTask.kt
+    purpose: task-level remapper defaults
+    key_elements:
+      - element: targetNamespace convention
+        type: pattern
+        location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/RemapTask.kt:59-64
+        description: RemapTask defaults targetNamespace to named, so unset target namespace means deobfuscate to named
+        language: Kotlin
+    lines: 82
+  - file: RemapAction.kt
+    path: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/RemapAction.kt
+    purpose: artifact transform defaults and source/target params
+    key_elements:
+      - element: Parameters.targetNamespace convention
+        type: pattern
+        location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/RemapAction.kt:48-52
+        description: RemapAction defaults targetNamespace to named; existing Cloche transform registration relies on this
+        language: Kotlin
+      - element: transform filterMods
+        type: function
+        location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/RemapAction.kt:69-81
+        description: non-mod inputs pass through unchanged; mod inputs get remapped with source/target namespaces
+        language: Kotlin
+    lines: 110
+patterns_found:
+  - category: architecture
+    pattern: Boolean remapped state plus string source namespace attribute
+    description: Dependency selection uses REMAPPED_ATTRIBUTE for transformed/untransformed state and RemapNamespaceAttribute.ATTRIBUTE for source namespace; target namespace is implicit named.
+    examples:
+      - file: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+        location: TargetCompilation.kt:210-219
+        snippet: from REMAPPED=false + remapNamespace=INITIAL -> to REMAPPED=true + remapNamespace=remapNamespace
+    prevalence: common
+  - category: structure
+    pattern: Mapping DSL doubles as transform registry source
+    description: MappingsBuilder adds mapping dependencies and also mutates remapNamespaces, which TargetCompilation reads afterEvaluate to register transforms.
+    examples:
+      - file: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt
+        location: MappingsBuilder.kt:64-68
+        snippet: remapNamespaces default INITIAL/OBF and helpers append intermediary/srg
+    prevalence: common
+  - category: architecture
+    pattern: Loader/internal namespace is represented by minecraftRemapNamespace
+    description: Target implementations compute minecraftRemapNamespace from loader and mapping compatibility; empty string means no remap/named direct path.
+    examples:
+      - file: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt
+        location: FabricTargetImpl.kt:342-357
+        snippet: Fabric uses intermediary unless unobfuscated + default/official-compatible
+      - file: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt
+        location: NeoForgeTargetImpl.kt:37-53
+        snippet: NeoForge default official-compatible path returns empty namespace
+    prevalence: common
+  - category: architecture
+    pattern: Mapping graph supports namespace switching internally
+    description: minecraft-codev uses MemoryMappingTree and MappingSourceNsSwitch; RemapTask/RemapAction accept arbitrary source/target strings and default target to named.
+    examples:
+      - file: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/MappingResolutionRule.kt
+        location: MappingResolutionRule.kt:21-38
+        snippet: MappingTreeProvider.withTree switches source namespace before applying rules
+    prevalence: common
+  - category: testing
+    pattern: No dedicated tests found for remap namespace behavior in cloche src/test or integration-test grep scope
+    description: Existing searched tests did not match remapNamespace/RemapNamespaceAttribute/MappingsBuilder/remapJar terms; verification likely needs integration Gradle builds or new tests.
+    examples:
+      - file: src/test/kotlin
+        location: src/test/kotlin grep
+        snippet: no matches for remapNamespace|RemapNamespaceAttribute|MappingsBuilder|remapJar
+    prevalence: rare
+related_architecture:
+  components_relevant_to_domain:
+    - component: RemapNamespaceAttribute
+      responsibility: public source namespace attribute and constants for build script dependency attributes
+      location: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt:84-91
+      relationship_to_domain: primary API/schema to replace; old ATTRIBUTE/INITIAL constants are incompatible with requested design
+    - component: MappingsBuilder
+      responsibility: configure mapping dependencies and namespace availability list
+      location: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:31-225
+      relationship_to_domain: should change from manual remapNamespaces list to mapping graph/source namespace registration
+    - component: TargetCompilation
+      responsibility: classpath attributes, artifact transform registration, dev jar remap, final compile Minecraft setup
+      location: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:176-425
+      relationship_to_domain: main implementation point for replacing attribute matching and transform parameters
+    - component: DefinedMinecraftProviders/getRemappedMinecraftByNamespace
+      responsibility: per-target Minecraft jar providers/classpaths and remap fallback by namespace
+      location: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt:28-201
+      relationship_to_domain: should align provider keys with new loader/source namespace graph and MC 26 no-deobf behavior
+    - component: Target implementations
+      responsibility: determine loader/default source namespace and create target-specific Minecraft remap tasks
+      location: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt, src/main/kotlin/earth/terrarium/cloche/target/forge/*.kt
+      relationship_to_domain: source namespace defaults are currently embedded as minecraftRemapNamespace/modRemapNamespace providers
+  interfaces_used_by_domain:
+    - interface: RemapAction.Parameters
+      location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/RemapAction.kt:29-58
+      usage_pattern: Cloche sets mappings and sourceNamespace; targetNamespace currently omitted so named is implicit
+    - interface: RemapTask
+      location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/RemapTask.kt:14-82
+      usage_pattern: target implementations set sourceNamespace; targetNamespace default named unless explicitly set
+    - interface: LoadMappings
+      location: ../minecraft-codev/minecraft-codev-remapper/src/main/kotlin/net/msrandom/minecraftcodev/remapper/task/LoadMappings.kt:18-54
+      usage_pattern: target.loadMappingsTask output is shared by mod transforms, Minecraft remap tasks, and runtime helper tasks
+  data_flow_involving_domain: Build script calls cloche.target.mappings -> MappingsBuilder adds mapping deps and remapNamespaces -> MinecraftTargetInternal.registerMappings attaches deps to mappings configuration -> LoadMappings produces tiny mapping graph -> TargetCompilation registers artifact transforms from dependency source namespace to named -> target-specific RemapTask turns Minecraft jars from loader/source namespace to named -> includeJar/remapJar may turn compiled project jar from named to modRemapNamespace for final output.
+  key_relationships_to_domain:
+    - from: TargetCompilation.setupModTransformationPipeline
+      to: MappingsBuilder.remapNamespaces
+      relationship: calls
+    - from: TargetCompilation.setupModTransformationPipeline
+      to: RemapAction.Parameters.sourceNamespace
+      relationship: composes
+    - from: MappingsBuilder.fabricIntermediary
+      to: RemapNamespaceAttribute.INTERMEDIARY
+      relationship: imports
+    - from: MappingsBuilder.mcpSearge/neoforgeSearge
+      to: RemapNamespaceAttribute.SEARGE
+      relationship: imports
+    - from: FabricTargetImpl
+      to: MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE
+      relationship: imports
+    - from: ForgeTargetImpl/NeoForgeTargetImpl
+      to: MinecraftCodevForgePlugin.SRG_MAPPINGS_NAMESPACE
+      relationship: imports
+    - from: GenericMinecraftRemapTasks
+      to: DefinedMinecraftProviders
+      relationship: composes
+related_technology_stack:
+  languages_used_in_domain:
+    - Kotlin
+    - Gradle Kotlin DSL
+  frameworks_used_in_domain:
+    - name: Gradle artifact transforms
+      usage_in_domain: registerTransform for NoopAction/RemapAction with attributes selecting transformed dependency variants
+    - name: Gradle Provider API
+      usage_in_domain: namespace decisions and task wiring use Provider<String>, ListProperty<String>, RegularFileProperty
+    - name: Fabric mapping-io
+      usage_in_domain: MemoryMappingTree, Tiny2FileReader/Writer, MappingSourceNsSwitch inside minecraft-codev remapper
+  libraries_used_in_domain:
+    - name: minecraft-codev-remapper
+      purpose_in_domain: LoadMappings, RemapTask, RemapAction and named namespace constant
+    - name: minecraft-codev-fabric
+      purpose_in_domain: Fabric intermediary namespace and Minecraft resolution/remap tasks
+    - name: minecraft-codev-forge
+      purpose_in_domain: SRG namespace, patched Minecraft resolution, Forge/NeoForge mapping resolution rules
+  external_apis_used_in_domain: []
+related_conventions:
+  naming_patterns_in_domain: Gradle task names built with lowerCamelCaseGradleName; remap tasks include featureName, variant, minecraft, namespace.
+  structure_of_domain: public API constants under api/attributes and api/MappingsBuilder; target-specific defaults under target/fabric and target/forge; generic remap provider registry at root GenericMinecraftRemapTasks.kt; compile pipeline under target/compilation.
+  error_handling_in_domain: InvalidUserCodeException used for user configuration errors; generic remap fallback uses error when no intermediary namespace/provider exists.
+  testing_in_domain: src/test contains ClocheIntegrationTests but grep found no namespace-specific tests; workspace tasks include external Lazyyyyy debugClochePatchResolution for patch resolution, not a direct cloche unit test.
+  documentation_in_domain: README currently documents RemapNamespaceAttribute examples; user requested no markdown change for this task.
+related_dependencies:
+  internal:
+    - component: RemapNamespaceAttribute -> MappingsBuilder
+      relationship_to_domain: MappingsBuilder imports constants and exposes remapNamespace extension DSL
+      direction: inbound
+    - component: RemapNamespaceAttribute -> TargetCompilation
+      relationship_to_domain: TargetCompilation configures classpath attributes and transform from/to values
+      direction: inbound
+    - component: MappingsBuilder -> MinecraftTargetInternal.registerMappings
+      relationship_to_domain: mapping actions and default dependencies are applied per target before transform registration reads state
+      direction: bidirectional
+    - component: TargetCompilation -> RemapAction/RemapJar/LoadMappings
+      relationship_to_domain: task/transform parameters derive from target namespaces and mapping output
+      direction: outbound
+    - component: GenericMinecraftRemapTasks -> FabricTargetImpl/ForgeLikeTargetImpl
+      relationship_to_domain: provider/classpath registration refers to target-specific tasks/configurations
+      direction: outbound
+  external:
+    - name: Gradle attributes/variant resolution
+      purpose_for_domain: dependency remapping is modeled as variant transformation keyed by REMAPPED_ATTRIBUTE and namespace attribute
+    - name: Fabric mapping-io
+      purpose_for_domain: maps namespace graph and supports source namespace switching
+    - name: minecraft-codev
+      purpose_for_domain: provides mapping loading, remapping actions/tasks, and namespace constants
+domain_security_considerations:
+  sensitive_areas:
+    - area: Dependency artifact transforms
+      location: TargetCompilation.kt:176-255
+      concern: Transform filters distinguish mod and non-mod jars; incorrect namespace matching can remap/pass through wrong third-party artifacts and produce invalid classpaths
+  authentication_patterns_in_domain: none observed
+  authorization_patterns_in_domain: none observed
+  data_validation_in_domain: Current arbitrary remapNamespace(namespace) accepts any string; new graph-based schema should validate namespace existence at configuration/execution boundary to avoid late remap failures.
+testing_patterns:
+  framework: Gradle TestKit / JUnit Platform inferred from project structure and AGENTS conventions; no namespace-specific tests found by grep
+  coverage_areas:
+    - plugin integration tests in src/test/kotlin/earth/terrarium/cloche/ClocheIntegrationTests.kt
+    - external workspace tasks for Lazyyyyy debugClochePatchResolution
+  test_organization: tests under src/test/kotlin; integration-test folder exists but grep found no namespace terms
+  mock_patterns: []
+implementation_targets:
+  files_to_modify:
+    - path: src/main/kotlin/earth/terrarium/cloche/api/attributes/Attributes.kt
+      reason: replace old RemapNamespaceAttribute ATTRIBUTE/INITIAL/OBF/SEARGE/INTERMEDIARY schema with new incompatible namespace graph/source-target schema
+    - path: src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt
+      reason: replace remapNamespaces list and remapNamespace DSL with mapping graph/source namespace declarations; adjust helper methods to declare mapping graph edges/namespaces from loaded mappings
+    - path: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+      reason: update compile/runtime attributes, setupModTransformationPipeline, RemapAction parameters, remapJar target/source namespace decisions, MC 26 no-deobf branches
+    - path: src/main/kotlin/earth/terrarium/cloche/GenericMinecraftRemapTasks.kt
+      reason: update provider registry/fallback from hard-coded intermediary source model to loader-default source namespace and mapping graph path
+    - path: src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt
+      reason: adjust minecraftRemapNamespace/modRemapNamespace naming/semantics and loadMappings dependency condition if empty namespace is replaced by explicit named/no-deobf state
+    - path: src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt
+      reason: update Fabric default source namespace and task names/output choices; ensure loader default source namespace remains intermediary where applicable
+    - path: src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt
+      reason: update shared Forge/NeoForge patched Minecraft remap path and named target assumptions
+    - path: src/main/kotlin/earth/terrarium/cloche/target/forge/lex/ForgeTargetImpl.kt
+      reason: update Forge loader source namespace default and SRG-specific runtime mapping generation if schema names change
+    - path: src/main/kotlin/earth/terrarium/cloche/target/forge/neo/NeoForgeTargetImpl.kt
+      reason: preserve MC 26/no-deobf empty or explicit named behavior while replacing source namespace API
+    - path: src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt
+      reason: outgoing variants may need explicit target namespace attributes if REMAPPED_ATTRIBUTE is no longer sufficient
+  existing_behavior:
+    - dependencies default to source namespace INITIAL(none); TargetCompilation maps INITIAL to target.modRemapNamespace for RemapAction.sourceNamespace
+    - RemapAction and RemapTask default targetNamespace to named, so target namespace is usually implicit named
+    - MappingsBuilder default transform namespace list includes INITIAL and OBF; Fabric/Forge helper methods append intermediary/srg
+    - minecraftRemapNamespace is loader/source namespace for Minecraft jar resolution/remap; modRemapNamespace determines project jar publication remap and dependency default source namespace
+    - empty namespace currently means no remap/unobfuscated path; compile/runtime classpaths set REMAPPED_ATTRIBUTE to false for unobfuscated Minecraft versions and true otherwise
+  minimal_replacement_strategy:
+    - replace old RemapNamespaceAttribute string/sentinel API with explicit source namespace attribute(s); avoid INITIAL/none sentinel
+    - make MappingsBuilder describe or expose mapping graph/source namespaces from mapping dependencies rather than manually accumulating remapNamespaces
+    - keep target namespace default named where possible by explicitly setting targetNamespace=named in Cloche code instead of relying on RemapAction/RemapTask conventions
+    - treat loader default source namespace as the default dependency source for each target: Fabric intermediary, Forge SRG, NeoForge named/none for MC 26 or official-compatible path
+    - update TargetCompilation transform registration to register from each known source namespace to target named, and NoopAction only when source equals target/no remap is needed
+    - update GenericMinecraftRemapTasks fallback to choose source provider from loader default namespace and remap along mapping graph to requested namespace; remove hard-coded INITIAL behavior
+    - preserve empty/no-deobf branch or replace with explicit named namespace state for MC 26 so no unnecessary remap/loadMappings dependency is introduced
+  test_targets:
+    - run Gradle tests for cloche: gradlew.bat test --console plain
+    - add/adjust TestKit case for dependency with explicit source namespace resolving through artifact transform to named
+    - add/adjust TestKit case for Fabric default loader source namespace without setting dependency attribute manually
+    - add/adjust TestKit case for Forge/NeoForge SRG source dependency remap and Minecraft provider remapClasspath
+    - add/adjust TestKit case for MC 26/unobfuscated NeoForge path ensuring no deobf remap and no required mappings dependency when official-compatible
+    - verify external reproduction task if still relevant: d:/Projects/Minecraft/Lazyyyyy/gradlew.bat debugClochePatchResolution --stacktrace --info
+  risks:
+    - Gradle attribute compatibility: removing old RemapNamespaceAttribute is intentionally incompatible, but any internal outgoing variant lacking new namespace attrs may fail resolution
+    - Transform registration timing: current afterEvaluate uses realized remapNamespaces; graph-driven namespaces may require provider-safe task/transform registration
+    - Mapping graph availability: LoadMappings output is task output; validating namespace graph at configuration time may be impossible without executing mapping load
+    - Empty namespace semantics: replacing empty string with named must not trigger remapping for MC 26/unobfuscated versions
+    - Runtime remap classpath: Fabric writeRemapClasspathTask and Forge generateMcpToSrg rely on current loader namespace assumptions
+    - Cache correctness: RemapTask/RemapAction cache keys include mappings/input/classpath but not explicit graph metadata beyond source/target inputs; new parameters must be annotated inputs if added
+open_questions:
+  - question: What exact new public schema replaces RemapNamespaceAttribute: separate source/target namespace Gradle attributes, named enum/object constants, or a mapping graph object exposed through MappingsBuilder?
+    context: User specified incompatible replacement and mapping-owned namespace graph, but no exact API names or Gradle attribute keys were provided.
+    type: decision_blocker
+    affects:
+      - Attributes.kt
+      - MappingsBuilder.kt
+      - TargetCompilation.kt
+  - question: Should target namespace remain hard-coded named for dependency transforms, or become configurable per target/compilation?
+    context: Objective says target usually named; existing RemapAction default named is implicit.
+    type: research
+    affects:
+      - TargetCompilation.kt
+      - GenericMinecraftRemapTasks.kt
+  - question: Is the mapping graph provided only by loaded tiny output at task execution, or should MappingsBuilder track declared edges before LoadMappings runs?
+    context: Gradle transforms are registered during configuration/afterEvaluate, before LoadMappings output can be inspected safely.
+    type: decision_blocker
+    affects:
+      - MappingsBuilder.kt
+      - TargetCompilation.kt
+      - LoadMappings integration
+gaps:
+  - area: Exact API design
+    description: Research identified implementation points but not concrete new class/attribute names because request provides high-level constraints only.
+    impact: decision_blocker
+    affects:
+      - public API
+      - migration breakage
+  - area: Tests
+    description: grep found no existing namespace-specific test fixtures; final test plan likely requires adding new TestKit cases.
+    impact: research_blocker
+    affects:
+      - verification confidence
+  - area: Runtime reproduction
+    description: Existing terminal shows Lazyyyyy debugClochePatchResolution failed, but output was not read during research-only scan.
+    impact: nice_to_know
+    affects:
+      - external validation

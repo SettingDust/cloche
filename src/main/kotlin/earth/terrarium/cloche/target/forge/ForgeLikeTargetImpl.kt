@@ -1,7 +1,7 @@
 package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
+import earth.terrarium.cloche.api.attributes.DependencyNamespaceAttribute
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeArtifactProvider
@@ -14,7 +14,6 @@ import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
 import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
-import earth.terrarium.cloche.util.createLoaderDependency
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
@@ -127,7 +126,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         if (isUnobfuscatedVersion(it)) {
             emptyList()
         } else {
-            listOf(generateClientExtra)
+            listOf(generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
         }
     })
 
@@ -157,7 +156,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         data.dependencies {
-            runtimeOnly.add(clientExtra)
+            implementation.add(clientExtra)
         }
 
         data
@@ -177,7 +176,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         test.dependencies {
-            runtimeOnly.add(clientExtra)
+            implementation.add(clientExtra)
         }
 
         test
@@ -190,9 +189,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         providerFactory.provider { false }
 
     override val runs = objectFactory.newInstance<ForgeRunConfigurations<out ForgeLikeTargetImpl>>(this)
-
-    abstract val group: String
-    abstract val artifact: String
 
     override val metadata = objectFactory.newInstance<ForgeMetadata>(this)
     override val legacyClasspath = main.legacyClasspath
@@ -214,7 +210,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             extendsFrom(minecraftLibrariesConfiguration)
         }
 
-        main.dependencyHandler.runtimeOnly(clientExtra)
+        main.dependencyHandler.implementation(clientExtra)
 
         val userdev = forgeDependency {
             capabilities {
@@ -230,6 +226,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
 
         project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev)
+        sourceNamespaces.add(DependencyNamespaceAttribute.SEARGE)
 
         registerMappings()
     }
@@ -245,19 +242,16 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             start.set(version)
         }
 
-    protected fun forgeDependency(
-        group: String = this.group,
-        artifact: String = this.artifact,
-        configure: ExternalModuleDependency.() -> Unit
-    ): Provider<ExternalModuleDependency> =
-        minecraftVersion.flatMap { minecraftVersion ->
-            loaderVersion.map { forgeVersion ->
-                dependencyFactory.createLoaderDependency(
-                    group,
-                    artifact,
-                    version(minecraftVersion, forgeVersion),
-                    configure
-                )
+    protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
+        minecraftVersion.zip(loaderVersion, ::Pair).flatMap { (minecraftVersion, forgeVersion) ->
+            group.zip(artifact) { group, artifact ->
+                dependencyFactory.create(group, artifact, null).apply {
+                    version {
+                        strictly(version(minecraftVersion, forgeVersion))
+                    }
+
+                    configure()
+                }
             }
         }
 

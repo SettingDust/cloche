@@ -6,6 +6,7 @@ import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.target.compilation.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
+import earth.terrarium.cloche.util.configureClassesAndResourcesVariant
 import earth.terrarium.cloche.util.optionalDir
 import earth.terrarium.cloche.util.withIdeaModule
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
@@ -22,7 +23,6 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.dsl.DependencyCollector
-import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
@@ -37,7 +37,6 @@ import org.gradle.language.jvm.tasks.ProcessResources
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
-internal const val CLASSES_AND_RESOURCES_VARIANT_NAME = "classesAndResources"
 
 fun Project.javaExecutableFor(
     version: Provider<String>,
@@ -310,36 +309,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         }
 
         if (!compilation.isTest) {
-            configurations.named(sourceSet.runtimeElementsConfigurationName) {
-                val configuration = this
-
-                val classesAndResourcesVariants = outgoing.variants.named { it == "classes" || it == "resources" }
-
-                val classesAndResourcesVariant = outgoing.variants.maybeCreate(
-                    CLASSES_AND_RESOURCES_VARIANT_NAME
-                ).also {
-                    it.attributes
-                        .attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.CLASSES_AND_RESOURCES))
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-
-                    classesAndResourcesVariants.configureEach {
-                        artifacts.configureEach {
-                            it.artifact(this)
-                        }
-                    }
-                }
-
-                components.named("java") {
-                    this as AdhocComponentWithVariants
-
-                    withVariantsFromConfiguration(configuration) {
-                        if (configurationVariant.name == classesAndResourcesVariant.name) {
-                            skip()
-                        }
-                    }
-                }
-            }
+            configureClassesAndResourcesVariant(sourceSet)
         }
 
         for (name in resolvableConfigurationNames) {

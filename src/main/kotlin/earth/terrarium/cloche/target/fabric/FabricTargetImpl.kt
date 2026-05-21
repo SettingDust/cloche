@@ -1,6 +1,7 @@
 package earth.terrarium.cloche.target.fabric
 
 import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.api.attributes.DependencyNamespaceAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.metadata.FabricMetadata
@@ -40,6 +41,7 @@ import net.msrandom.minecraftcodev.runs.task.WriteClasspathFile
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.SourceSet
@@ -84,7 +86,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             )
         }
 
-    internal val resolveCommonMinecraft =
+    private val resolveCommonMinecraft =
         project.tasks.register<ResolveMinecraftCommon>(
             lowerCamelCaseGradleName("resolve", name, "common"),
         ) {
@@ -100,6 +102,9 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                 }
             })
         }
+
+    internal val resolveCommonMinecraftOutput: Provider<RegularFile>
+        get() = resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
 
     internal val resolveClientMinecraft =
         project.tasks.register<ResolveMinecraftClient>(
@@ -278,23 +283,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private val namedCommonJar = minecraftRemapNamespace.flatMap {
-        if (it.isEmpty()) {
-            resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
-        } else {
-            remapCommon.flatMap(RemapTask::outputFile)
-        }
-    }
-
     private val clientJar = minecraftRemapNamespace.flatMap {
-        if (it.isEmpty()) {
-            resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
-        } else {
-            remapClient.flatMap(RemapTask::outputFile)
-        }
-    }
-
-    private val namedClientJar = minecraftRemapNamespace.flatMap {
         if (it.isEmpty()) {
             resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
         } else {
@@ -332,8 +321,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     ClochePlugin.CLIENT_COMPILATION_NAME,
                     this,
                     intermediaryClasspath,
-                    namedCommonJar,
-                    namedClientJar,
+                    commonJar,
+                    clientJar,
                     main.finalMinecraftFile,
                     data = false,
                     test = false,
@@ -432,6 +421,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
         main = registerCommonCompilation(SourceSet.MAIN_SOURCE_SET_NAME)
 
+        sourceSet.runtimeClasspath += project.files(generateMappingsArtifact.flatMap(Zip::getArchiveFile))
+
         commonLibrariesConfiguration.shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
         project.configurations.named(sourceSet.localImplementationConfigurationName) {
@@ -439,6 +430,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
 
         mappings.fabricIntermediary()
+        sourceNamespaces.add(DependencyNamespaceAttribute.INTERMEDIARY)
 
         registerMappings()
 
@@ -483,7 +475,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             this,
             lowerCamelCaseGradleName(name.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals), "common"),
             project.compilationSourceSet(this, name),
-            namedCommonJar,
+            commonJar,
             project.provider { emptyList() },
             project.provider { ModDistribution.common }
         )
@@ -497,8 +489,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                 name,
                 this,
                 intermediaryClasspath,
-                namedCommonJar,
-                namedClientJar,
+                commonJar,
+                clientJar,
                 commonTasks.accessWidenTask.flatMap(AccessWiden::outputFile),
                 name == ClochePlugin.DATA_COMPILATION_NAME,
                 name == SourceSet.TEST_SOURCE_SET_NAME,
