@@ -1,0 +1,252 @@
+plan_id: 20260521-aw-helper-conditional
+objective: Adjust TargetCompilation AW dependency helper so it is conditional for unobfuscated Minecraft versions and requests REMAPPED_ATTRIBUTE from the same !isUnobfuscatedVersion provider used by target compile/runtime classpaths, without adding tests or markdown docs.
+created_at: '2026-05-21'
+created_by: gem-planner
+status: pending
+research_confidence: high
+plan_metrics:
+  wave_1_task_count: 1
+  total_dependencies: 1
+  risk_score: low
+tldr: |
+  Make the TargetCompilation access widener dependency classpath resolve non-project artifacts with REMAPPED_ATTRIBUTE driven by target.minecraftVersion.map { !isUnobfuscatedVersion(it) }, removing the explicit named namespace request because research shows RemapNamespaceAttribute=named is unnecessary/wrong for this helper. Verify with publishToMavenLocal and the allowed Lazyyyyy accessWidenFabric201CommonMinecraft flow, deleting Lazyyyyy build/minecraft and build/minecraft-codev before each run.
+open_questions: []
+gaps: []
+patterns_found:
+  - name: Compile/runtime classpath remap provider
+    description: TargetCompilation compile and runtime classpath configurations already set REMAPPED_ATTRIBUTE through target.minecraftVersion.map { !isUnobfuscatedVersion(it) } and keep RemapNamespaceAttribute.INITIAL.
+    confidence: 0.95
+    sources:
+      - src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+  - name: Access widener helper overconstrains remap namespace
+    description: getNamedAccessWidenerClasspath currently requests REMAPPED_ATTRIBUTE=true and RemapNamespaceAttribute=named for all versions, unlike the conditional compile/runtime configuration pattern.
+    confidence: 0.95
+    sources:
+      - src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+pre_mortem:
+  overall_risk_level: low
+  critical_failure_modes:
+    - scenario: The helper still forces remapped artifacts for an unobfuscated Minecraft version, causing unnecessary or invalid transforms in Lazyyyyy 1.20.1.
+      likelihood: medium
+      impact: medium
+      mitigation: Pass target.minecraftVersion into the helper and use the same !isUnobfuscatedVersion provider used by compile/runtime configurations.
+    - scenario: Verification accidentally reuses stale Lazyyyyy transformed minecraft outputs and masks the fix.
+      likelihood: medium
+      impact: medium
+      mitigation: Delete Lazyyyyy build/minecraft and build/minecraft-codev before every accessWidenFabric201CommonMinecraft run.
+  assumptions:
+    - Research conclusion is authoritative: RemapNamespaceAttribute=named is unnecessary/wrong for this access widener dependency helper.
+    - Only production code in Cloche needs to change.
+    - No test files or markdown documentation should be created or modified.
+implementation_specification:
+  code_structure: |
+    Keep the change localized to TargetCompilation.kt. Rename or repurpose getNamedAccessWidenerClasspath so it accepts the target Minecraft version provider or target object, resolves external compile classpath artifacts, and sets only REMAPPED_ATTRIBUTE through minecraftVersion.map { !isUnobfuscatedVersion(it) }. Do not add RemapNamespaceAttribute.ATTRIBUTE in this helper. Wire registerCompilationTransformations to call the updated helper with target.minecraftVersion.
+  affected_areas:
+    - src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+  component_details:
+    - component: TargetCompilation access widener dependency helper
+      responsibility: Provide AccessWiden with dependency jars appropriate for the target version's obfuscation state.
+      interfaces:
+        - Gradle artifactView attributes
+        - REMAPPED_ATTRIBUTE provider
+        - AccessWiden.accessWideners FileCollection
+      dependencies:
+        - component: Minecraft version unobfuscation detection
+          relationship: isUnobfuscatedVersion decides whether dependencies should be remapped.
+      integration_points:
+        - registerCompilationTransformations
+        - AccessWiden task configuration
+contracts:
+  - from_task: implement-aw-helper-conditional
+    to_task: verify-aw-helper-conditional
+    interface: TargetCompilation production source change
+    format: One localized Kotlin diff removing explicit RemapNamespaceAttribute=named from the access widener helper and using a REMAPPED_ATTRIBUTE provider based on !isUnobfuscatedVersion.
+tasks:
+  - id: implement-aw-helper-conditional
+    title: Make the access widener helper conditional by target version
+    description: Update TargetCompilation's access widener dependency helper to use a REMAPPED_ATTRIBUTE provider matching !isUnobfuscatedVersion(target.minecraftVersion) and remove the explicit RemapNamespaceAttribute=named request. Keep the diff production-only and localized.
+    wave: 1
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - Conditional access widener dependency resolution
+      - Removal of wrong named namespace helper attribute
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+        description: Contains getNamedAccessWidenerClasspath, registerCompilationTransformations, and compile/runtime REMAPPED_ATTRIBUTE provider examples.
+    diagnosis:
+      root_cause: Access widener helper always requests remapped named artifacts, but research indicates named namespace selection is unnecessary/wrong and remapping should be conditional for unobfuscated versions.
+      fix_recommendations: Reuse the compile/runtime classpath pattern: REMAPPED_ATTRIBUTE = target.minecraftVersion.map { !isUnobfuscatedVersion(it) }, with no RemapNamespaceAttribute=named in the helper.
+      injected_at: '2026-05-21'
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial simple implementation plan from supplied research conclusion.
+        timestamp: '2026-05-21'
+    estimated_effort: small
+    estimated_files: 1
+    estimated_lines: 30
+    focus_area: implementation
+    verification:
+      - Inspect TargetCompilation.kt diff to confirm the helper no longer sets RemapNamespaceAttribute.ATTRIBUTE to named.
+      - Confirm the helper's REMAPPED_ATTRIBUTE is provider-backed with !isUnobfuscatedVersion.
+    acceptance_criteria:
+      - No test files are created or modified.
+      - No markdown docs are created or modified.
+      - TargetCompilation AW helper does not request RemapNamespaceAttribute=named.
+      - TargetCompilation AW helper sets REMAPPED_ATTRIBUTE from target.minecraftVersion.map { !isUnobfuscatedVersion(it) } or equivalent provider.
+    success_criteria:
+      - modified_files.only_contains == ['src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt']
+      - aw_helper.explicit_named_namespace_attribute == false
+      - aw_helper.remapped_attribute_provider == '!isUnobfuscatedVersion'
+    failure_modes:
+      - scenario: Changing the helper signature leaves a stale call site or unused import.
+        likelihood: medium
+        impact: medium
+        mitigation: Run Cloche publishToMavenLocal or a focused Kotlin compile via the wrapper after editing.
+    tech_stack:
+      - Kotlin
+      - Gradle artifact views
+      - Cloche Gradle plugin
+    test_coverage: No test files by request; validate through build/publish and external Lazyyyyy task.
+    debugger_diagnosis: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - Research already determined RemapNamespaceAttribute=named is unnecessary/wrong for the AW dependency helper.
+        - compileFabric201Kotlin must not be run.
+      required_test_first: No test files; start with source diff and verify with existing Gradle tasks only.
+      target_files:
+        - src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt
+      minimal_change: Update only the AW helper and its call site; do not refactor unrelated classpath helpers.
+      acceptance_checks:
+        - No RemapNamespaceAttribute=named remains in the AW helper.
+        - REMAPPED_ATTRIBUTE uses the same conditional provider semantics as compile/runtime classpaths.
+    research_sources:
+      - user-supplied-research: RemapNamespaceAttribute=named unnecessary/wrong; helper should match !isUnobfuscatedVersion.
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    validation_matrix: []
+    flows: []
+    fixtures: {}
+    test_data: []
+    cleanup: false
+    visual_regression: {}
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+    task_type: null
+    audience: null
+    coverage_matrix: []
+  - id: verify-aw-helper-conditional
+    title: Publish Cloche and verify Lazyyyyy access widening
+    description: Run allowed verification only: publish Cloche locally, then run Lazyyyyy accessWidenFabric201CommonMinecraft/debug validation with mandatory cache cleanup before every accessWidenFabric201CommonMinecraft invocation. Do not run compileFabric201Kotlin.
+    wave: 2
+    agent: gem-implementer
+    prototype: false
+    covers:
+      - Local publish verification
+      - Lazyyyyy consumer verification
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - implement-aw-helper-conditional
+    conflicts_with: []
+    context_files:
+      - path: build.gradle.kts
+        description: Cloche build and publish configuration.
+      - path: gradle.properties
+        description: Cloche version consumed by local publish.
+      - path: ../Lazyyyyy/build.gradle.kts
+        description: External consumer project task graph and dependency use if inspection is needed.
+    diagnosis:
+      root_cause: Depends on implementation task output.
+      fix_recommendations: Verify with existing Gradle tasks only; preserve user constraints on task selection and cleanup.
+      injected_at: '2026-05-21'
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: Initial simple verification plan from supplied constraints.
+        timestamp: '2026-05-21'
+    estimated_effort: small
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: verification
+    verification:
+      - From cloche root, run .\gradlew.bat publishToMavenLocal --refresh-dependencies --console=plain.
+      - Before each Lazyyyyy accessWidenFabric201CommonMinecraft invocation, delete D:\Projects\Minecraft\Lazyyyyy\build\minecraft and D:\Projects\Minecraft\Lazyyyyy\build\minecraft-codev.
+      - From Lazyyyyy root, run .\gradlew.bat accessWidenFabric201CommonMinecraft --stacktrace --info --console=plain.
+      - If using debugClochePatchResolution as supporting evidence, ensure it does not trigger forbidden compileFabric201Kotlin.
+    acceptance_criteria:
+      - Cloche publishToMavenLocal exits 0.
+      - Lazyyyyy accessWidenFabric201CommonMinecraft exits 0 after mandatory build/minecraft and build/minecraft-codev deletion.
+      - compileFabric201Kotlin is not run.
+      - No test files are created or modified.
+      - No markdown docs are created or modified.
+    success_criteria:
+      - cloche_publish_to_maven_local.exit_code == 0
+      - lazyyyyy_accessWidenFabric201CommonMinecraft.exit_code == 0
+      - ran_tasks.not_contains == ['compileFabric201Kotlin']
+      - lazyyyyy_cleanup.before_each_accessWidenFabric201CommonMinecraft == true
+    failure_modes:
+      - scenario: Lazyyyyy resolves a stale Cloche artifact from cache after local publish.
+        likelihood: medium
+        impact: medium
+        mitigation: Use --refresh-dependencies for Cloche publish and delete Lazyyyyy build/minecraft plus build/minecraft-codev before each access widen run.
+      - scenario: A broad Gradle task implicitly executes compileFabric201Kotlin.
+        likelihood: medium
+        impact: medium
+        mitigation: Run the narrow accessWidenFabric201CommonMinecraft task only; avoid build/check/compileFabric201Kotlin.
+    tech_stack:
+      - Gradle Wrapper
+      - Maven Local
+      - Cloche
+      - Lazyyyyy consumer project
+    test_coverage: Existing build and consumer task verification only; no test file changes.
+    debugger_diagnosis: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - Do not run compileFabric201Kotlin.
+        - Every Lazyyyyy accessWidenFabric201CommonMinecraft run must delete build/minecraft and build/minecraft-codev first.
+      required_test_first: Not applicable; this is post-implementation verification.
+      target_files: []
+      minimal_change: Verification-only task; do not edit source unless implementation failed acceptance.
+      acceptance_checks:
+        - publishToMavenLocal passes.
+        - accessWidenFabric201CommonMinecraft passes with cleanup evidence.
+    research_sources:
+      - user-supplied-research: Verification constraints for Lazyyyyy accessWidenFabric201CommonMinecraft.
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    validation_matrix:
+      - scenario: Lazyyyyy access widening after clean minecraft transform outputs
+        steps:
+          - Delete D:\Projects\Minecraft\Lazyyyyy\build\minecraft.
+          - Delete D:\Projects\Minecraft\Lazyyyyy\build\minecraft-codev.
+          - Run .\gradlew.bat accessWidenFabric201CommonMinecraft --stacktrace --info --console=plain from D:\Projects\Minecraft\Lazyyyyy.
+        expected_result: Task exits 0 without access widener namespace mismatch.
+    flows: []
+    fixtures: {}
+    test_data: []
+    cleanup: true
+    visual_regression: {}
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+    task_type: null
+    audience: null
+    coverage_matrix: []
+extra:
+  prd_update_recommended: false
+  prd_update_reason: null
