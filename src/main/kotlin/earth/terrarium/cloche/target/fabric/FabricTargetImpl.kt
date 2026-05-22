@@ -399,6 +399,8 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         project.dependencyFactory.create("net.fabricmc", "fabric-loader", it)
     }
 
+    private var mappingsRegistered = false
+
     init {
         val commonStub =
             project.dependencies.enforcedPlatform(ClochePlugin.STUB_DEPENDENCY) as ExternalModuleDependency
@@ -428,11 +430,6 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             extendsFrom(commonLibrariesConfiguration)
         }
 
-        mappings.fabricIntermediary()
-        sourceNamespaces.add(DependencyNamespaceAttribute.INTERMEDIARY)
-
-        registerMappings()
-
         // afterEvaluate needed because of the component rules using providers
         project.afterEvaluate {
             dependencies.components {
@@ -455,6 +452,16 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         main.dependencies {
             implementation.add(fabricLoader)
         }
+    }
+
+    override fun finalizeTargetConventions() {
+        if (mappingsRegistered) return
+        mappingsRegistered = true
+
+        mappings.fabricIntermediary()
+        sourceNamespaces.add(DependencyNamespaceAttribute.INTERMEDIARY)
+
+        registerMappings()
     }
 
     private fun output(suffix: String? = null) = outputDirectory.zip(minecraftVersion) { dir, version ->

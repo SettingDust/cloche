@@ -196,6 +196,8 @@ internal abstract class MinecraftTargetInternal(
         }
     }
 
+    internal open fun finalizeTargetConventions() {}
+
     abstract fun onClientIncluded(action: () -> Unit)
 
     override fun runs(action: Action<RunConfigurations>) {

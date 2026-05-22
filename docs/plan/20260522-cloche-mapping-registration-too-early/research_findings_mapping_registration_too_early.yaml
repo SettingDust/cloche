@@ -1,0 +1,237 @@
+plan_id: "20260522-cloche-mapping-registration-too-early"
+objective: "Clarify updated bug report: Cloche still throws because a Provider passed to attributeProvider is absent when TargetCompilation.registerNamespace configures transforms from setupModTransformationPipeline."
+focus_area: "mapping_registration_too_early"
+created_at: "2026-05-22"
+created_by: "GitHub Copilot"
+status: completed
+tldr: |
+  - The error path is centered on TargetCompilation.init -> setupModTransformationPipeline -> sourceNamespaces.all/registerNamespace.
+  - registerNamespace calls compilation.baseAttributes(from/to), which reaches TargetCompilation.attributes, then MinecraftTargetInternal.attributes.
+  - MinecraftTargetInternal.attributes registers TargetAttributes.MINECRAFT_VERSION and CLOCHE_MINECRAFT_VERSION through attributeProvider(target.minecraftVersion).
+  - Gradle requires attributeProvider providers to be present when queried; target.minecraftVersion is only conventioned from cloche.minecraftVersion in addTarget before handleTarget, so absent global/user target version still fails during transform registration.
+  - Updated focus should stay on lifecycle/order and attribute-provider presence, not tests.
+research_metadata:
+  methodology: "Direct AGENTS/context review, exact grep for setupModTransformationPipeline/registerNamespace/sourceNamespaces/minecraftVersion/attributeProvider, targeted reads of ClochePlugin, TargetCompilation, MinecraftTargetInternal, ClocheExtension, TargetApplicator, FabricTargetImpl, ForgeLikeTargetImpl, ProjectPluginApplicator."
+  scope: "Clarify mode for bug route and focus only; no edits and no tests."
+  confidence: high
+  coverage: 86
+  decision_blockers: 0
+  research_blockers: 0
+files_analyzed:
+  - file: "ClochePlugin.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+    purpose: "Defines addTarget ordering for target conventions and handling."
+    key_elements:
+      - element: "addTarget"
+        type: function
+        location: "ClochePlugin.kt:51"
+        description: "Applies target.minecraftVersion.convention(cloche.minecraftVersion), calls target.afterConventionsApplied(), applies mappings/metadata conventions, then handleTarget(target)."
+        language: Kotlin
+    lines: 78
+  - file: "TargetCompilation.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"
+    purpose: "Owns setupModTransformationPipeline and compilation attributes involved in failing transform registration."
+    key_elements:
+      - element: "setupModTransformationPipeline"
+        type: function
+        location: "TargetCompilation.kt:247"
+        description: "Registers remap transforms for namespaces discovered from target.sourceNamespaces and target.mappings.sourceNamespaces."
+        language: Kotlin
+      - element: "registerNamespace"
+        type: function
+        location: "TargetCompilation.kt:252"
+        description: "Calls compilation.baseAttributes(from) and compilation.baseAttributes(to) while registering transforms, which causes target attributes to be queried."
+        language: Kotlin
+      - element: "TargetCompilation.init"
+        type: pattern
+        location: "TargetCompilation.kt:426"
+        description: "Calls setupModTransformationPipeline before configuring compile/runtime classpath attributes and Minecraft files."
+        language: Kotlin
+      - element: "TargetCompilation.attributes"
+        type: function
+        location: "TargetCompilation.kt:534"
+        description: "Delegates to super and target.attributes, then adds side/data attributes."
+        language: Kotlin
+    lines: 552
+  - file: "MinecraftTargetInternal.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt"
+    purpose: "Defines target-level attributes and post-convention mapping registration hook."
+    key_elements:
+      - element: "MinecraftTargetInternal.attributes"
+        type: function
+        location: "MinecraftTargetInternal.kt:171"
+        description: "Adds loader attributes and attributeProvider entries for target.minecraftVersion."
+        language: Kotlin
+      - element: "afterConventionsApplied"
+        type: function
+        location: "MinecraftTargetInternal.kt:199"
+        description: "Lifecycle hook overridden by loader targets to register mappings/source namespaces once conventions are installed."
+        language: Kotlin
+    lines: 230
+  - file: "ClocheExtension.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+    purpose: "Shows single-target path and global minecraftVersion property."
+    key_elements:
+      - element: "ClocheExtension.minecraftVersion"
+        type: variable
+        location: "ClocheExtension.kt:89"
+        description: "Root extension property used as convention for target.minecraftVersion."
+        language: Kotlin
+      - element: "SingleTargetConfigurator.target"
+        type: function
+        location: "ClocheExtension.kt:50"
+        description: "Creates target, invokes singleTargetSetCallback, calls addTarget before user configure action executes."
+        language: Kotlin
+    lines: 110
+  - file: "TargetApplicator.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/TargetApplicator.kt"
+    purpose: "Shows container target application path."
+    key_elements:
+      - element: "applyTargets"
+        type: function
+        location: "TargetApplicator.kt:19"
+        description: "Uses cloche.targets.all and calls addTarget for each MinecraftTargetInternal before wiring common target dependencies."
+        language: Kotlin
+    lines: 80
+  - file: "FabricTargetImpl.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt"
+    purpose: "Loader-specific post-convention registration behavior."
+    key_elements:
+      - element: "FabricTargetImpl.afterConventionsApplied"
+        type: function
+        location: "FabricTargetImpl.kt:457"
+        description: "Adds intermediary mappings/source namespace and calls registerMappings after conventions are applied."
+        language: Kotlin
+    lines: 490
+  - file: "ForgeLikeTargetImpl.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt"
+    purpose: "Loader-specific post-convention registration behavior."
+    key_elements:
+      - element: "ForgeLikeTargetImpl.afterConventionsApplied"
+        type: function
+        location: "ForgeLikeTargetImpl.kt:231"
+        description: "Adds userdev mapping dependency, searge source namespace, and calls registerMappings after conventions are applied."
+        language: Kotlin
+    lines: 245
+patterns_found:
+  - category: architecture
+    pattern: "Post-convention loader hook"
+    description: "Loader targets override afterConventionsApplied to add default mappings/source namespaces and call registerMappings after addTarget installs minecraftVersion convention."
+    examples:
+      - file: "src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt"
+        location: "FabricTargetImpl.kt:457"
+        snippet: "override fun afterConventionsApplied() { ... mappings.fabricIntermediary(); sourceNamespaces.add(...); registerMappings() }"
+    prevalence: common
+  - category: architecture
+    pattern: "Compilation attributes delegate through target attributes"
+    description: "TargetCompilation.attributes calls target.attributes, so transform base attributes include loader and minecraftVersion attributes."
+    examples:
+      - file: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"
+        location: "TargetCompilation.kt:534"
+        snippet: "super.attributes(attributes); target.attributes(attributes)"
+    prevalence: common
+  - category: structure
+    pattern: "Namespace listeners immediately configure transforms"
+    description: "DomainObjectCollection.all callbacks on target.sourceNamespaces and target.mappings.sourceNamespaces invoke registerNamespace for existing and future namespaces."
+    examples:
+      - file: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"
+        location: "TargetCompilation.kt:319"
+        snippet: "target.sourceNamespaces.all(::registerNamespace)"
+    prevalence: occasional
+  - category: error_handling
+    pattern: "Attribute providers require present values at query time"
+    description: "The observed Gradle failure is consistent with using attributeProvider on target.minecraftVersion before that provider has an actual value."
+    examples:
+      - file: "src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt"
+        location: "MinecraftTargetInternal.kt:177"
+        snippet: ".attributeProvider(TargetAttributes.MINECRAFT_VERSION, target.minecraftVersion)"
+    prevalence: rare
+related_architecture:
+  components_relevant_to_domain:
+    - component: "addTarget"
+      responsibility: "Target lifecycle entry point: installs minecraftVersion convention, runs post-convention hook, then handles target."
+      location: "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt:51"
+      relationship_to_domain: "Defines ordering under investigation."
+    - component: "setupModTransformationPipeline"
+      responsibility: "Registers remap artifact transforms for target/mapping source namespaces."
+      location: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt:247"
+      relationship_to_domain: "Immediate failing route for registerNamespace."
+    - component: "MinecraftTargetInternal.attributes"
+      responsibility: "Adds target-level attributes including minecraftVersion provider-backed attributes."
+      location: "src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt:171"
+      relationship_to_domain: "Likely absent Provider source when transform attributes are queried."
+  interfaces_used_by_domain:
+    - interface: "AttributeContainer"
+      location: "Gradle API, used in TargetCompilation.kt and MinecraftTargetInternal.kt"
+      usage_pattern: "Receives literal attributes and provider-backed attributes for dependency matching and transform registration."
+  data_flow_involving_domain: "cloche.minecraftVersion -> target.minecraftVersion convention in addTarget -> target.attributes(attributeProvider) -> compilation.baseAttributes during registerNamespace -> Gradle transform attribute query."
+  key_relationships_to_domain:
+    - from: "TargetCompilation.registerNamespace"
+      to: "TargetCompilation.baseAttributes"
+      relationship: calls
+    - from: "TargetCompilation.attributes"
+      to: "MinecraftTargetInternal.attributes"
+      relationship: calls
+    - from: "MinecraftTargetInternal.attributes"
+      to: "target.minecraftVersion"
+      relationship: composes
+related_technology_stack:
+  languages_used_in_domain: ["Kotlin"]
+  frameworks_used_in_domain:
+    - name: "Gradle Plugin API"
+      usage_in_domain: "Provider API, DomainObjectCollection callbacks, dependency attributes, artifact transforms."
+  libraries_used_in_domain:
+    - name: "minecraft-codev"
+      purpose_in_domain: "Supplies Minecraft dependency attributes including TargetAttributes.MINECRAFT_VERSION/CLOCHE_MINECRAFT_VERSION."
+  external_apis_used_in_domain:
+    - name: "Gradle AttributeContainer.attributeProvider"
+      integration_point: "MinecraftTargetInternal.attributes and TargetCompilation attributes."
+related_conventions:
+  naming_patterns_in_domain: "Lifecycle methods use addTarget/handleTarget/afterConventionsApplied; transform setup uses setup*Pipeline and registerNamespace."
+  structure_of_domain: "Target creation and convention wiring live outside loader implementations; loader implementations provide afterConventionsApplied overrides."
+  error_handling_in_domain: "Missing required target properties are often checked afterEvaluate, but Gradle attributeProvider may fail earlier during attribute query."
+  testing_in_domain: "No tests run due user clarification; existing AGENTS recommends narrow test runs only when delegated."
+  documentation_in_domain: "AGENTS.md documents minimal focused changes and wrapper-based Gradle validation."
+related_dependencies:
+  internal:
+    - component: "ClocheExtension.minecraftVersion"
+      relationship_to_domain: "Convention source for target.minecraftVersion."
+      direction: outbound
+    - component: "MappingsBuilder.sourceNamespaces"
+      relationship_to_domain: "Triggers namespace transform registration through all listeners."
+      direction: inbound
+    - component: "TargetCompilation.attributes"
+      relationship_to_domain: "Bridge from transform registration to target minecraftVersion attribute provider."
+      direction: bidirectional
+  external:
+    - name: "Gradle Provider API"
+      purpose_for_domain: "Represents lazy minecraftVersion and side values."
+    - name: "Gradle artifact transforms"
+      purpose_for_domain: "Registers RemapAction transforms for namespace remapping."
+domain_security_considerations:
+  sensitive_areas:
+    - area: "Dependency resolution attributes"
+      location: "TargetCompilation.kt:252 and MinecraftTargetInternal.kt:171"
+      concern: "Incorrect attributes can select wrong artifacts; no authentication or secret handling present."
+  authentication_patterns_in_domain: "None observed in researched path."
+  authorization_patterns_in_domain: "None observed in researched path."
+  data_validation_in_domain: "loaderVersion missing is checked afterEvaluate; minecraftVersion presence is not validated before attributeProvider query in this route."
+testing_patterns:
+  framework: "JUnit Platform via Gradle TestKit in repository, not executed for this clarification."
+  coverage_areas: ["Plugin behavior", "integration scenarios"]
+  test_organization: "src/test/kotlin in root project; integration-test separate Gradle project."
+  mock_patterns: []
+open_questions:
+  - question: "Should target.minecraftVersion be mandatory before addTarget/handleTarget, or should transform registration avoid provider-backed minecraftVersion attributes until the provider is present?"
+    context: "The failure occurs before later afterEvaluate validation can report a domain-specific missing minecraftVersion."
+    type: decision_blocker
+    affects: ["fix route", "error timing"]
+  - question: "Does the failing Lazyyyyy build set cloche.minecraftVersion globally, target.minecraftVersion per target, or neither?"
+    context: "User provided stack route but not the build script values in this clarification request."
+    type: research
+    affects: ["root cause confirmation"]
+gaps:
+  - area: "External reproducer configuration"
+    description: "No current read of D:\Projects\\Minecraft\\Lazyyyyy build files in clarify pass."
+    impact: nice_to_know
+    affects: ["confirming whether minecraftVersion is absent or late-bound"]

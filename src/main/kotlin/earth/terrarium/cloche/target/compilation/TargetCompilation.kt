@@ -336,6 +336,7 @@ internal open class TargetCompilationInfo<T : MinecraftTargetInternal>(
 internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject constructor(info: TargetCompilationInfo<T>) :
     CompilationInternal() {
     private val _info = info
+    private var modTransformationPipelineConfigured = false
 
     open val info
         get() = _info
@@ -476,9 +477,14 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         null
     }
 
-    init {
-        setupModTransformationPipeline(project, _info.target, this)
+    internal fun setupModTransformationPipelineOnce() {
+        if (modTransformationPipelineConfigured) return
 
+        modTransformationPipelineConfigured = true
+        setupModTransformationPipeline(project, _info.target, this)
+    }
+
+    init {
         val minecraftBuildDependenciesHolder: Configuration =
             project.configurations.detachedConfiguration(
                 project.dependencies.create(

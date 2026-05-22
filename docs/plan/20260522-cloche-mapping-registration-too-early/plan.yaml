@@ -1,0 +1,192 @@
+plan_id: "20260522-cloche-mapping-registration-too-early"
+objective: "Verify current Cloche fix by publishing to local Maven without version changes, then testing ModSets with JAVA_HOME set to D:\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current."
+created_at: "2026-05-22"
+created_by: "GitHub Copilot"
+status: pending
+research_confidence: high
+plan_metrics:
+  wave_1_task_count: 1
+  total_dependencies: 1
+  risk_score: low
+tldr: |
+  Publish the existing Cloche version to Maven local, then run a ModSets Gradle verification task against the locally published plugin to confirm the early mapping-registration provider error is gone.
+open_questions: []
+gaps: []
+pre_mortem:
+  overall_risk_level: low
+  critical_failure_modes:
+    - scenario: "ModSets resolves the remote Cloche artifact instead of the freshly published local Maven artifact."
+      likelihood: low
+      impact: medium
+      mitigation: "Confirm ModSets pluginManagement includes mavenLocal and observe Gradle output/version behavior before interpreting verification results."
+  assumptions:
+    - "No source or version changes are required or allowed for this verification pass."
+    - "ModSets has mavenLocal available in pluginManagement and declares target minecraftVersion values in build.gradle.kts."
+implementation_specification:
+  code_structure: "No implementation changes; execute Gradle wrapper tasks only."
+  affected_areas:
+    - "Cloche local Maven publication"
+    - "ModSets Gradle configuration/reproduction verification"
+  component_details:
+    - component: "Cloche publishToMavenLocal"
+      responsibility: "Publish current plugin artifacts with existing version to local Maven."
+      interfaces:
+        - "gradlew.bat publishToMavenLocal"
+      dependencies: []
+      integration_points:
+        - "Local Maven repository"
+    - component: "ModSets Gradle verification"
+      responsibility: "Configure or run a relevant Gradle task with JAVA_HOME override and detect whether the provider-present mapping-registration error remains."
+      interfaces:
+        - "gradlew.bat tasks or selected verification task"
+      dependencies:
+        - component: "Cloche publishToMavenLocal"
+          relationship: "Consumes locally published Cloche plugin artifact."
+      integration_points:
+        - "ModSets settings.gradle.kts pluginManagement repositories"
+contracts:
+  - from_task: "publish_cloche_local"
+    to_task: "test_modsets"
+    interface: "Local Maven artifact"
+    format: "Existing Cloche group/version from gradle.properties published via Maven local"
+tasks:
+  - id: "publish_cloche_local"
+    title: "Publish Cloche to local Maven"
+    description: "Run Cloche Gradle publishToMavenLocal with the existing version and no source/version edits."
+    wave: 1
+    agent: "gem-devops"
+    prototype: false
+    covers:
+      - "publish current Cloche fix locally"
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\cloche\\gradle.properties"
+        description: "Defines current version 0.18.14-dust.2; must not be changed."
+      - path: "d:\Projects\\Minecraft\\cloche\\build.gradle.kts"
+        description: "Defines maven-publish setup and publishToMavenLocal behavior."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Initial verification plan from user request."
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: "local_publication"
+    verification:
+      - "Run d:\Projects\\Minecraft\\cloche\\gradlew.bat publishToMavenLocal --console plain."
+      - "Confirm task exits successfully without modifying gradle.properties."
+    acceptance_criteria:
+      - "publishToMavenLocal succeeds."
+      - "Cloche version remains unchanged."
+    success_criteria:
+      - "command.exit_code === 0"
+      - "git_diff.gradile_properties_changed === false"
+    failure_modes:
+      - scenario: "Gradle cannot run under default Java."
+        likelihood: low
+        impact: medium
+        mitigation: "Retry once with JAVA_HOME set to D:\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current."
+    tech_stack:
+      - "Gradle"
+      - "Kotlin DSL"
+      - "Maven local"
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "Do not re-open the root cause unless publication fails."
+        - "Do not change project version."
+      required_test_first: "Not applicable; verification-only task."
+      target_files: []
+      minimal_change: "No file changes."
+      acceptance_checks:
+        - "publishToMavenLocal succeeded"
+    research_sources:
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/research_findings_mapping_registration_too_early.yaml"
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+  - id: "test_modsets"
+    title: "Verify ModSets against local Cloche"
+    description: "Run ModSets Gradle discovery or reproduction/configuration task with JAVA_HOME set and report whether the provider-present mapping-registration error is gone."
+    wave: 2
+    agent: "gem-devops"
+    prototype: false
+    covers:
+      - "verify provider-present error is resolved in external consumer"
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - "publish_cloche_local"
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\ModSets\\settings.gradle.kts"
+        description: "Shows mavenLocal in pluginManagement repositories."
+      - path: "d:\Projects\\Minecraft\\ModSets\\build.gradle.kts"
+        description: "Defines Cloche targets and explicit minecraftVersion values used in verification."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Initial verification plan from user request."
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: "external_consumer_verification"
+    verification:
+      - "Set JAVA_HOME=D:\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current for the ModSets Gradle invocation."
+      - "Run a narrow Gradle task that configures Cloche targets; discover task if the exact reproduction task is unknown."
+      - "Inspect output for absence or presence of 'Cannot query the value of this provider because it has no value available' or equivalent provider-present error."
+    acceptance_criteria:
+      - "Selected ModSets Gradle invocation reaches configuration/task execution without the provider-present mapping-registration failure."
+      - "Any remaining failure is classified separately from the original provider-present error."
+    success_criteria:
+      - "provider_present_error_found === false"
+      - "local_cloche_artifact_used === true"
+    failure_modes:
+      - scenario: "The selected ModSets task fails for unrelated dependency or environment reasons."
+        likelihood: medium
+        impact: medium
+        mitigation: "Report the unrelated failure separately and explicitly state whether the original provider-present error is absent."
+      - scenario: "Task discovery itself triggers configuration failure."
+        likelihood: low
+        impact: medium
+        mitigation: "Use the discovery output as reproduction evidence and classify the error message directly."
+    tech_stack:
+      - "Gradle"
+      - "Cloche Gradle plugin"
+      - "ModSets"
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "Do not modify ModSets files."
+        - "Do not change Cloche version."
+      required_test_first: "Not applicable; verification-only task."
+      target_files: []
+      minimal_change: "No file changes."
+      acceptance_checks:
+        - "JAVA_HOME override used"
+        - "provider-present error status reported"
+    research_sources:
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/research_findings_mapping_registration_too_early.yaml"
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+extra:
+  prd_update_recommended: false
+  prd_update_reason: null

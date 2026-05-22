@@ -1,0 +1,257 @@
+plan_id: "20260522-cloche-ordering-hardening"
+objective: "Review current Cloche lifecycle diff and identify changes no longer needed after refactor."
+focus_area: "redundant_lifecycle_changes"
+created_at: "2026-05-22"
+created_by: "GitHub Copilot"
+status: completed
+tldr: |
+  - Current diff implements a two-phase lifecycle: early prepare via target factories/prepareTarget/addTarget/handleTarget, late finalization via targetConfigured/whenTargetConfigured/finalizeTarget.
+  - The main cleanup candidate is duplicate explicit prepareTarget calls after targets.maybeCreate, because factories already call prepareTarget.
+  - The idempotence guard in prepareTarget makes the duplicate call safe, but no longer necessary on the named-container target path.
+  - Single-target prepareTarget remains necessary because it bypasses the targets container factory.
+  - The late afterConventionsApplied hooks and setupModTransformationPipelineOnce guards remain needed; previous verification showed publishToMavenLocal and ModSets help succeeding without the prior failure patterns.
+research_metadata:
+  methodology: "AGENTS.md context, repo memory, git diff inspection, source reads, diagnostics"
+  scope: "Current uncommitted Cloche lifecycle changes in main Kotlin target lifecycle files."
+  confidence: high
+  coverage: 86
+  decision_blockers: 0
+  research_blockers: 0
+files_analyzed:
+  - file: "ClocheExtension.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+    purpose: "Target creation, prepare/configured lifecycle dispatch, single-target path."
+    key_elements:
+      - element: "targets registerFactory(...).also(::prepareTarget)"
+        type: pattern
+        location: "ClocheExtension.kt:97-108"
+        description: "Container target factories prepare targets at object creation time."
+        language: Kotlin
+      - element: "target(name, type, configure)"
+        type: function
+        location: "ClocheExtension.kt:237-248"
+        description: "Named target path calls maybeCreate, then prepareTarget, user configure, dependsOn(common), targetConfigured."
+        language: Kotlin
+      - element: "SingleTargetConfigurator.target"
+        type: function
+        location: "ClocheExtension.kt:56-86"
+        description: "Single-target path constructs directly through ObjectFactory, then calls prepareTarget before user configure and targetConfigured after."
+        language: Kotlin
+    lines: 263
+  - file: "ClochePlugin.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+    purpose: "Lifecycle split between addTarget and finalizeTarget."
+    key_elements:
+      - element: "addTarget"
+        type: function
+        location: "ClochePlugin.kt:48-65"
+        description: "Applies conventions, metadata conventions, early handleTarget, then targetHandled callbacks."
+        language: Kotlin
+      - element: "finalizeTarget"
+        type: function
+        location: "ClochePlugin.kt:67-82"
+        description: "Runs afterConventionsApplied, Cloche mapping actions, and late mod transformation pipeline setup."
+        language: Kotlin
+    lines: 118
+  - file: "TargetApplicator.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/TargetApplicator.kt"
+    purpose: "Late target finalization and common-target dependency linking."
+    key_elements:
+      - element: "applyTargets"
+        type: function
+        location: "TargetApplicator.kt:22-25"
+        description: "Uses cloche.whenTargetConfigured before finalizeTarget and source dependency linking."
+        language: Kotlin
+    lines: 239
+  - file: "TargetHandler.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt"
+    purpose: "Early target/source-set/task wiring and late transform finalization."
+    key_elements:
+      - element: "handleTarget"
+        type: function
+        location: "TargetHandler.kt:224-413"
+        description: "Creates compilation wiring, configurations, variants, run asset tasks, and artifacts."
+        language: Kotlin
+      - element: "finalizeTargetModTransformationPipeline"
+        type: function
+        location: "TargetHandler.kt:416-443"
+        description: "Invokes setupModTransformationPipelineOnce for target compilations after target configuration."
+        language: Kotlin
+    lines: 443
+  - file: "MinecraftTargetInternal.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/MinecraftTargetInternal.kt"
+    purpose: "Target internals and late convention hook declaration."
+    key_elements:
+      - element: "afterConventionsApplied"
+        type: function
+        location: "MinecraftTargetInternal.kt:199"
+        description: "Default no-op hook overridden by loader targets for late mapping defaults."
+        language: Kotlin
+    lines: 207
+  - file: "FabricTargetImpl.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/fabric/FabricTargetImpl.kt"
+    purpose: "Fabric-specific late mapping namespace/default setup."
+    key_elements:
+      - element: "mappingsRegistered"
+        type: variable
+        location: "FabricTargetImpl.kt:402"
+        description: "Idempotence guard for late Fabric mapping registration."
+        language: Kotlin
+      - element: "afterConventionsApplied"
+        type: function
+        location: "FabricTargetImpl.kt:457-466"
+        description: "Adds fabricIntermediary mapping defaults, INTERMEDIARY source namespace, and registerMappings late."
+        language: Kotlin
+    lines: 520
+  - file: "ForgeLikeTargetImpl.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/forge/ForgeLikeTargetImpl.kt"
+    purpose: "Forge-like late mapping namespace/default setup."
+    key_elements:
+      - element: "mappingsRegistered"
+        type: variable
+        location: "ForgeLikeTargetImpl.kt:196"
+        description: "Idempotence guard for late Forge-like mapping registration."
+        language: Kotlin
+      - element: "afterConventionsApplied"
+        type: function
+        location: "ForgeLikeTargetImpl.kt:229-242"
+        description: "Adds moddev-bundle mappings provider, SEARGE source namespace, and registerMappings late."
+        language: Kotlin
+    lines: 280
+  - file: "TargetCompilation.kt"
+    path: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"
+    purpose: "Compilation transformation pipeline registration timing."
+    key_elements:
+      - element: "setupModTransformationPipelineOnce"
+        type: function
+        location: "TargetCompilation.kt:480-485"
+        description: "Idempotently defers RemapAction transform registration until late finalization."
+        language: Kotlin
+    lines: 520
+patterns_found:
+  - category: architecture
+    pattern: "Two-phase target lifecycle"
+    description: "Early phase prepares target structure before user/external callbacks; late phase registers mappings, namespaces, and transforms after user DSL/provider values."
+    examples:
+      - file: "ClocheExtension.kt"
+        location: "ClocheExtension.kt:97-108"
+        snippet: "objects.newInstance<FabricTargetImpl>(it).also(::prepareTarget)"
+      - file: "TargetApplicator.kt"
+        location: "TargetApplicator.kt:22-25"
+        snippet: "cloche.whenTargetConfigured { target -> finalizeTarget(cloche, project, target) }"
+    prevalence: common
+  - category: structure
+    pattern: "Identity/idempotence guards around lifecycle callbacks"
+    description: "preparedTargets/configuredTargets and per-target flags prevent repeated lifecycle work across multiple paths."
+    examples:
+      - file: "ClocheExtension.kt"
+        location: "ClocheExtension.kt:123-124"
+        snippet: "Collections.newSetFromMap(IdentityHashMap<MinecraftTarget, Boolean>())"
+      - file: "TargetCompilation.kt"
+        location: "TargetCompilation.kt:480-485"
+        snippet: "if (modTransformationPipelineConfigured) return"
+    prevalence: common
+  - category: architecture
+    pattern: "Late loader mapping defaults"
+    description: "Fabric/Forge mapping defaults and source namespaces moved out of init into afterConventionsApplied."
+    examples:
+      - file: "FabricTargetImpl.kt"
+        location: "FabricTargetImpl.kt:457-466"
+        snippet: "mappings.fabricIntermediary(); sourceNamespaces.add(DependencyNamespaceAttribute.INTERMEDIARY); registerMappings()"
+      - file: "ForgeLikeTargetImpl.kt"
+        location: "ForgeLikeTargetImpl.kt:229-242"
+        snippet: "sourceNamespaces.add(DependencyNamespaceAttribute.SEARGE); registerMappings()"
+    prevalence: occasional
+  - category: structure
+    pattern: "Redundant safe prepare call on named target path"
+    description: "targets.maybeCreate invokes the registered factory, whose factory already calls prepareTarget; the subsequent explicit prepareTarget(target) is therefore safe but redundant for normal named target creation."
+    examples:
+      - file: "ClocheExtension.kt"
+        location: "ClocheExtension.kt:97-108"
+        snippet: "registerFactory(...).also(::prepareTarget)"
+      - file: "ClocheExtension.kt"
+        location: "ClocheExtension.kt:239-241"
+        snippet: "val target = targets.maybeCreate(name, type); prepareTarget(target)"
+    prevalence: rare
+related_architecture:
+  components_relevant_to_domain:
+    - component: "ClocheExtension"
+      responsibility: "Owns target containers and lifecycle dispatch state."
+      location: "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+      relationship_to_domain: "Primary lifecycle coordinator."
+    - component: "addTarget/finalizeTarget"
+      responsibility: "Separate early structural setup from late mapping/transform setup."
+      location: "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+      relationship_to_domain: "Defines lifecycle phase boundaries."
+    - component: "TargetCompilation"
+      responsibility: "Registers remap transform pipeline only when explicitly finalized."
+      location: "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"
+      relationship_to_domain: "Late-phase transform registration."
+  interfaces_used_by_domain:
+    - interface: "PolymorphicDomainObjectContainer<MinecraftTarget>"
+      location: "ClocheExtension.kt:97"
+      usage_pattern: "registerFactory constructs typed targets and can prepare them before normal container callbacks."
+    - interface: "DomainObjectCollection<Action<MappingsBuilder>>"
+      location: "ClocheExtension.kt:119"
+      usage_pattern: "Global mapping actions are replayed during late target finalization."
+  data_flow_involving_domain: "User creates target -> container factory or direct ObjectFactory creates target -> prepareTarget/addTarget/handleTarget creates source sets and configurations -> user target DSL executes -> targetConfigured triggers applyTargets -> finalizeTarget applies mapping defaults/actions and transformation pipeline."
+  key_relationships_to_domain:
+    - from: "ClocheExtension.target"
+      to: "prepareTarget"
+      relationship: calls
+    - from: "prepareTarget"
+      to: "addTarget"
+      relationship: calls
+    - from: "applyTargets"
+      to: "finalizeTarget"
+      relationship: calls
+    - from: "finalizeTarget"
+      to: "finalizeTargetModTransformationPipeline"
+      relationship: calls
+related_technology_stack:
+  languages_used_in_domain: ["Kotlin"]
+  frameworks_used_in_domain:
+    - name: "Gradle Plugin API"
+      usage_in_domain: "Target containers, configuration/action callbacks, artifact transforms, tasks, configurations."
+  libraries_used_in_domain:
+    - name: "minecraft-codev"
+      purpose_in_domain: "Minecraft resolution, remapper, access widener, Fabric/Forge integration tasks."
+  external_apis_used_in_domain:
+    - name: "Gradle Provider API"
+      integration_point: "Provider-backed attributes and dependency providers used by mappings and transforms."
+related_conventions:
+  naming_patterns_in_domain: "Lifecycle methods use prepare/finalize/configured terminology; Gradle task/config names use lowerCamelCaseGradleName."
+  structure_of_domain: "Core lifecycle coordination in ClocheExtension/ClochePlugin, target-specific mapping defaults in target impls, compilation transform setup in TargetCompilation."
+  error_handling_in_domain: "Invalid user configuration is reported through InvalidUserCodeException; lifecycle idempotence uses guards rather than errors."
+  testing_in_domain: "Gradle TestKit integration tests exist under src/test/kotlin; current validation also used publishToMavenLocal plus external ModSets help."
+  documentation_in_domain: "No markdown documentation created for this review."
+related_dependencies:
+  internal:
+    - component: "ClocheExtension.prepareTarget"
+      relationship_to_domain: "Calls addTarget early and depends on registered factory/direct creation paths."
+      direction: outbound
+    - component: "ClocheExtension.targetConfigured"
+      relationship_to_domain: "Feeds applyTargets late finalization callbacks."
+      direction: outbound
+    - component: "FabricTargetImpl.afterConventionsApplied"
+      relationship_to_domain: "Supplies Fabric mapping defaults after user configuration."
+      direction: inbound
+  external:
+    - name: "Gradle artifact transforms"
+      purpose_for_domain: "RemapAction registration timing is central to avoiding provider/missing configuration failures."
+domain_security_considerations:
+  sensitive_areas: []
+  authentication_patterns_in_domain: "Not applicable."
+  authorization_patterns_in_domain: "Not applicable."
+  data_validation_in_domain: "Provider presence and loaderVersion/modId validation occur through existing Gradle validation paths."
+testing_patterns:
+  framework: "JUnit Platform / Gradle TestKit"
+  coverage_areas: ["Plugin lifecycle", "integration scenarios", "external ModSets smoke verification"]
+  test_organization: "src/test/kotlin plus external consumer project smoke commands."
+  mock_patterns: []
+open_questions: []
+gaps:
+  - area: "Automated cleanup verification"
+    description: "No source cleanup was applied in researcher mode; duplicate prepareTarget removal was identified but not verified by compile after removal."
+    impact: nice_to_know
+    affects: ["ClocheExtension.target"]

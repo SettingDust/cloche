@@ -1,0 +1,407 @@
+plan_id: "20260522-cloche-ordering-hardening"
+objective: "Implement robust Cloche lifecycle split: early target prepare registers source sets, tasks, and configurations before external configureEach callbacks; late finalization registers mappings, namespaces, and transforms after user target DSL/provider values and nonMod configurations. Preserve ongoing fixes and verify with ModSets."
+created_at: "2026-05-22"
+created_by: "GitHub Copilot"
+status: pending
+research_confidence: high
+plan_metrics:
+  wave_1_task_count: 1
+  total_dependencies: 3
+  risk_score: medium
+tldr: |
+  Split target lifecycle into idempotent early preparation and late finalization. Keep early preparation at target factory/maybeCreate time for source sets/tasks/configurations, move mapping namespace/transform registration to the already-deferred targetConfigured/applyTargets path, then publish locally and verify ModSets with the required JAVA_HOME.
+open_questions: []
+gaps: []
+pre_mortem:
+  overall_risk_level: medium
+  critical_failure_modes:
+    - scenario: "Late finalization is never called for a target created through single-target mode or named container DSL."
+      likelihood: low
+      impact: high
+      mitigation: "Use existing targetConfigured callbacks for both SingleTargetConfigurator.target and ClocheExtension.target, and keep preparation/finalization idempotent."
+    - scenario: "Mappings or namespace listeners remain in early preparation and still query absent provider-backed attributes before user DSL values are set."
+      likelihood: medium
+      impact: high
+      mitigation: "Audit addTarget, handleTarget, afterConventionsApplied, finalizeTargetModTransformationPipeline, TargetCompilation.setupModTransformationPipelineOnce, FabricTargetImpl, and ForgeLikeTargetImpl before implementation."
+    - scenario: "External configureEach callbacks observe targets before generated task names/configurations exist."
+      likelihood: medium
+      impact: high
+      mitigation: "Keep handleTarget in early prepare invoked from target factories and maybeCreate path before user configure actions and before external callbacks rely on task existence."
+  assumptions:
+    - "The current uncommitted lifecycle work in ClocheExtension.kt, ClochePlugin.kt, TargetApplicator.kt, TargetHandler.kt, and TargetCompilation.kt is intentional and must be preserved unless directly refined."
+    - "ModSets resolves the locally published existing Cloche version from Maven local."
+    - "No markdown documentation should be created for this change."
+implementation_specification:
+  code_structure: "Keep lifecycle orchestration in ClocheExtension.kt, ClochePlugin.kt, and target handlers. Early prepare should be target-object idempotent and responsible for conventions plus handleTarget. Late finalization should run after user target DSL through whenTargetConfigured/applyTargets and should register loader mapping defaults, mapping actions, source namespaces, and remap transforms."
+  affected_areas:
+    - "Target creation and configureEach ordering"
+    - "Loader mapping namespace registration"
+    - "Mod transformation pipeline registration"
+    - "External ModSets Gradle verification"
+  component_details:
+    - component: "Early target preparation"
+      responsibility: "Install target conventions and register source sets, tasks, dependency configurations, variants, and generated task wiring before external target callbacks need them."
+      interfaces:
+        - "ClocheExtension.prepareTarget(target)"
+        - "addTarget(cloche, project, target)"
+        - "handleTarget(target)"
+      dependencies: []
+      integration_points:
+        - "PolymorphicDomainObjectContainer target factories"
+        - "ClocheExtension.target maybeCreate path"
+        - "SingleTargetConfigurator.target"
+    - component: "Late target finalization"
+      responsibility: "After user target DSL/provider values are applied, install loader mapping defaults, cloche mapping actions, source namespace listeners, and remap transforms exactly once."
+      interfaces:
+        - "ClocheExtension.targetConfigured(target)"
+        - "applyTargets(project, cloche)"
+        - "finalizeTarget(cloche, project, target)"
+        - "finalizeTargetModTransformationPipeline(target)"
+      dependencies:
+        - component: "Early target preparation"
+          relationship: "Requires source sets/configurations/tasks and nonMod configurations to already exist."
+      integration_points:
+        - "FabricTargetImpl.afterConventionsApplied"
+        - "ForgeLikeTargetImpl.afterConventionsApplied"
+        - "TargetCompilation.setupModTransformationPipelineOnce"
+    - component: "External verification"
+      responsibility: "Publish current Cloche artifact locally and verify ModSets no longer fails with missing versionFabric201Jar/task ordering or absent provider mapping errors."
+      interfaces:
+        - "gradlew.bat publishToMavenLocal"
+        - "ModSets gradlew.bat help or debugClochePatchResolution"
+      dependencies:
+        - component: "Late target finalization"
+          relationship: "Consumes implementation behavior via Maven local publication."
+      integration_points:
+        - "Maven local"
+        - "D:\Projects\\Minecraft\\ModSets"
+contracts:
+  - from_task: "research_current_lifecycle"
+    to_task: "implement_lifecycle_split"
+    interface: "Lifecycle audit"
+    format: "List of exact files/functions where early prepare and late finalization must be preserved or moved."
+  - from_task: "implement_lifecycle_split"
+    to_task: "verify_modsets"
+    interface: "Locally publishable Cloche implementation"
+    format: "Existing project version artifact via publishToMavenLocal; no version change."
+  - from_task: "implement_lifecycle_split"
+    to_task: "review_lifecycle_split"
+    interface: "Patch diff"
+    format: "Focused Kotlin/Gradle diff preserving existing changes and lifecycle invariants."
+tasks:
+  - id: "research_current_lifecycle"
+    title: "Audit current Cloche lifecycle split"
+    description: "Inspect current source and uncommitted lifecycle diff to identify which hooks are early-only, late-only, or idempotent, and record any ongoing fixes that must be preserved."
+    wave: 1
+    agent: "gem-researcher"
+    prototype: false
+    covers:
+      - "current lifecycle hook inventory"
+      - "ongoing diff preservation constraints"
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClocheExtension.kt"
+        description: "Target factories, maybeCreate path, prepareTarget, targetConfigured callbacks."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClochePlugin.kt"
+        description: "addTarget/finalizeTarget lifecycle entry points."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\target\\TargetHandler.kt"
+        description: "handleTarget and finalizeTargetModTransformationPipeline responsibilities."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Initial plan from user-provided ordering-hardening objective."
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 3
+    estimated_lines: 0
+    focus_area: "lifecycle_research"
+    verification:
+      - "Read current lifecycle source and existing diffs before implementation."
+      - "Confirm early preparation still creates target source sets/tasks/configurations before user/external configureEach observes the target."
+      - "Confirm late finalization has a single path after user target DSL/provider values are assigned."
+    acceptance_criteria:
+      - "Exact hooks/flags needed for idempotent early and late phases are identified."
+      - "Existing ongoing fixes are enumerated so implementation does not overwrite them."
+    success_criteria:
+      - "lifecycle_hooks.early.includes('handleTarget') === true"
+      - "lifecycle_hooks.late.includes('finalizeTargetModTransformationPipeline') === true"
+      - "ongoing_diffs_preserved === true"
+    failure_modes:
+      - scenario: "Research misses an existing uncommitted edit and implementation overwrites it."
+        likelihood: medium
+        impact: high
+        mitigation: "Inspect git diff/status before editing and limit edits to lifecycle files already in scope."
+    tech_stack:
+      - "Kotlin"
+      - "Gradle Plugin API"
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "AGENTS.md already establishes Gradle wrapper and minimal focused changes."
+        - "Known ModSets route requires Maven local publication with unchanged Cloche version."
+      required_test_first: "Not applicable; research-only task."
+      target_files:
+        - "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt"
+      minimal_change: "No source changes; produce implementation constraints."
+      acceptance_checks:
+        - "Lifecycle split points documented for implementer."
+    research_sources:
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/research_findings_mapping_registration_too_early.yaml"
+      - "/memories/repo/research_cloche_lifecycle_internal_hook_naming.yaml"
+      - "/memories/repo/research_cloche_mapping_registration_too_early.yaml"
+      - "/memories/repo/research_cloche_modsets_validation_route.yaml"
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+  - id: "implement_lifecycle_split"
+    title: "Implement idempotent early prepare and late finalization"
+    description: "Refine lifecycle code so target creation prepares tasks/source sets/configurations immediately, while loader mappings, source namespaces, mapping actions, and transforms finalize only after user target configuration."
+    wave: 2
+    agent: "gem-implementer"
+    prototype: false
+    covers:
+      - "early source set/task/configuration registration"
+      - "late mapping namespace/transform registration"
+      - "idempotent lifecycle guards"
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - "research_current_lifecycle"
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClocheExtension.kt"
+        description: "Owns prepared/configured target sets and target factory/maybeCreate/singleTarget order."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClochePlugin.kt"
+        description: "Lifecycle functions to keep split and idempotent."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\target\\TargetHandler.kt"
+        description: "Early handleTarget and late finalizeTargetModTransformationPipeline responsibilities."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Initial implementation plan from user-provided ordering-hardening objective."
+        timestamp: "2026-05-22"
+    estimated_effort: medium
+    estimated_files: 3
+    estimated_lines: 220
+    focus_area: "lifecycle_implementation"
+    verification:
+      - "Run .\\gradlew.bat compileTestKotlin --console=plain or narrower compile task from the Cloche root."
+      - "Run relevant Cloche tests if compile succeeds and a matching lifecycle regression test exists or is added."
+      - "Inspect diff to confirm gradle.properties version is unchanged."
+    acceptance_criteria:
+      - "External targets.configureEach callbacks can observe generated target tasks/configurations immediately after maybeCreate without missing versionFabric201Jar-style tasks."
+      - "Mappings/namespaces/transforms are registered after user target DSL/provider values and nonMod configurations are available."
+      - "Early and late lifecycle operations are idempotent for repeated prepareTarget/targetConfigured calls."
+      - "Existing ongoing fixes are preserved."
+    success_criteria:
+      - "compile.exit_code === 0"
+      - "gradle_properties.version_changed === false"
+      - "early_prepare_before_user_configure === true"
+      - "late_finalize_after_user_configure === true"
+    failure_modes:
+      - scenario: "Moving too much work to late finalization reintroduces missing target task/configuration errors in external configureEach callbacks."
+        likelihood: medium
+        impact: high
+        mitigation: "Only move mapping/default namespace/transform registration late; keep handleTarget early."
+      - scenario: "Leaving transform registration early still queries absent target.minecraftVersion providers."
+        likelihood: medium
+        impact: high
+        mitigation: "Ensure afterConventionsApplied, mappingActions.all, and finalizeTargetModTransformationPipeline are invoked from targetConfigured/applyTargets only."
+      - scenario: "Idempotence guard uses equality instead of identity and mishandles Gradle target objects."
+        likelihood: low
+        impact: medium
+        mitigation: "Reuse existing identity-based preparedTargets pattern and add a separate finalized/configured guard if needed."
+    tech_stack:
+      - "Kotlin"
+      - "Gradle Plugin API"
+      - "Gradle Provider API"
+    test_coverage: "Add/update a focused regression test if an existing TestKit pattern can express external configureEach observing target tasks; otherwise compile plus ModSets verification is required."
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "Do not change project version."
+        - "Do not create markdown docs."
+        - "Do not move handleTarget out of early prepare."
+        - "Do not register remap transforms before user target DSL values are applied."
+      required_test_first: "If feasible, add a failing TestKit case where targets.configureEach observes target jar task/configurations after target DSL maybeCreate; otherwise document infeasibility in task result and run compile."
+      target_files:
+        - "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt"
+      minimal_change: "Adjust lifecycle ordering and guards only; no unrelated refactor."
+      acceptance_checks:
+        - "compileTestKotlin or relevant tests pass"
+        - "No version change"
+        - "Lifecycle split remains early handleTarget / late finalizeTargetModTransformationPipeline"
+    research_sources:
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/research_findings_mapping_registration_too_early.yaml"
+      - "/memories/repo/research_cloche_lifecycle_internal_hook_naming.yaml"
+      - "/memories/repo/research_cloche_mapping_registration_too_early.yaml"
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+  - id: "verify_modsets"
+    title: "Verify ModSets with locally published Cloche"
+    description: "Publish the unchanged Cloche version to Maven local, then run ModSets Gradle verification with the specified JAVA_HOME and confirm known lifecycle/order errors are absent."
+    wave: 3
+    agent: "gem-devops"
+    prototype: false
+    covers:
+      - "local Maven publication"
+      - "external ModSets verification"
+    priority: high
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - "implement_lifecycle_split"
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\cloche\\gradle.properties"
+        description: "Defines current version; must not be changed."
+      - path: "d:\Projects\\Minecraft\\ModSets\\settings.gradle.kts"
+        description: "External consumer plugin resolution repositories."
+      - path: "d:\Projects\\Minecraft\\ModSets\\build.gradle.kts"
+        description: "External Cloche target DSL and configureEach behavior."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Initial verification plan from user-provided ordering-hardening objective."
+        timestamp: "2026-05-22"
+    estimated_effort: medium
+    estimated_files: 0
+    estimated_lines: 0
+    focus_area: "external_verification"
+    verification:
+      - "Set JAVA_HOME to D:\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current for Gradle invocations that require it."
+      - "Run d:\Projects\\Minecraft\\cloche\\gradlew.bat publishToMavenLocal --console=plain without changing version."
+      - "Run a ModSets configuration task such as help, tasks, or debugClochePatchResolution with --console=plain --stacktrace."
+      - "Check output for absence of missing versionFabric201Jar and absent-provider mapping registration errors."
+    acceptance_criteria:
+      - "publishToMavenLocal succeeds using existing version."
+      - "ModSets verification does not fail with versionFabric201Jar missing."
+      - "ModSets verification does not fail with provider has no value / mapping-registration-too-early errors."
+      - "Any remaining failure is classified separately."
+    success_criteria:
+      - "publish.exit_code === 0"
+      - "modsets_output.contains('versionFabric201Jar') === false"
+      - "modsets_output.contains('Cannot query the value of this provider because it has no value available') === false"
+    failure_modes:
+      - scenario: "ModSets resolves a remote Cloche artifact instead of Maven local."
+        likelihood: low
+        impact: high
+        mitigation: "Inspect Gradle output and pluginManagement repositories before interpreting verification."
+      - scenario: "ModSets fails for unrelated dependency/toolchain reasons."
+        likelihood: medium
+        impact: medium
+        mitigation: "Report unrelated failure separately while explicitly checking the known error strings."
+    tech_stack:
+      - "Gradle"
+      - "Maven local"
+      - "Cloche Gradle plugin"
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "Do not modify ModSets files."
+        - "Do not change Cloche version."
+        - "Use JAVA_HOME D:\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current."
+      required_test_first: "Not applicable; verification task after implementation compile/tests."
+      target_files: []
+      minimal_change: "No source changes; run publication and verification commands only."
+      acceptance_checks:
+        - "publishToMavenLocal succeeded"
+        - "Known ModSets errors absent"
+    research_sources:
+      - "/memories/repo/research_cloche_modsets_validation_route.yaml"
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/plan.yaml"
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false
+    environment: development
+    requires_approval: false
+    devops_security_sensitive: false
+  - id: "review_lifecycle_split"
+    title: "Review lifecycle split patch"
+    description: "Review the lifecycle diff for ordering regressions, provider timing issues, idempotence, and unintended version/documentation changes."
+    wave: 3
+    agent: "gem-reviewer"
+    prototype: false
+    covers:
+      - "lifecycle ordering review"
+      - "security and dependency-resolution sanity"
+    priority: medium
+    status: pending
+    flags:
+      flaky: false
+      retries_used: 0
+    dependencies:
+      - "implement_lifecycle_split"
+    conflicts_with: []
+    context_files:
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClocheExtension.kt"
+        description: "Target preparation/configuration guards."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\ClochePlugin.kt"
+        description: "Lifecycle split functions."
+      - path: "d:\Projects\\Minecraft\\cloche\\src\\main\\kotlin\\earth\\terrarium\\cloche\\target\\TargetHandler.kt"
+        description: "Early/late target handler responsibilities."
+    planning_pass: 1
+    planning_history:
+      - pass: 1
+        reason: "Review requested by user."
+        timestamp: "2026-05-22"
+    estimated_effort: small
+    estimated_files: 3
+    estimated_lines: 0
+    focus_area: "review"
+    verification:
+      - "Inspect diff after implementation."
+      - "Confirm no markdown docs were created for changes."
+      - "Confirm gradle.properties version is unchanged."
+      - "Confirm no transform registration happens before targetConfigured finalization path."
+    acceptance_criteria:
+      - "Patch preserves early task/configuration visibility for external configureEach callbacks."
+      - "Patch defers mapping/namespaces/transforms until after user DSL/provider values."
+      - "No obvious dependency-resolution security regressions or broad unrelated refactors."
+    success_criteria:
+      - "review.findings.blocking.length === 0"
+      - "version_changed === false"
+      - "markdown_docs_created === false"
+    failure_modes:
+      - scenario: "Review overlooks subtle Gradle callback timing edge case."
+        likelihood: medium
+        impact: medium
+        mitigation: "Cross-check both singleTarget and named target paths and use ModSets verification as evidence."
+    tech_stack:
+      - "Kotlin"
+      - "Gradle Plugin API"
+    test_coverage: null
+    implementation_handoff:
+      do_not_reinvestigate:
+        - "Do not implement fixes during review."
+      required_test_first: "Not applicable; read-only review."
+      target_files:
+        - "src/main/kotlin/earth/terrarium/cloche/ClocheExtension.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/ClochePlugin.kt"
+        - "src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt"
+      minimal_change: "Read-only review output."
+      acceptance_checks:
+        - "No blocking findings"
+    research_sources:
+      - "docs/plan/20260522-cloche-mapping-registration-too-early/research_findings_mapping_registration_too_early.yaml"
+    requires_review: true
+    review_depth: standard
+    review_security_sensitive: false
+extra:
+  prd_update_recommended: false
+  prd_update_reason: null
