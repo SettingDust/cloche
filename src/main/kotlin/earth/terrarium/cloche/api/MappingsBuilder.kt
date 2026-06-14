@@ -2,7 +2,6 @@ package earth.terrarium.cloche.api
 
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.util.maybeRegister
 import net.msrandom.minecraftcodev.core.task.ResolveMinecraftMappings
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
@@ -31,7 +30,7 @@ internal fun officialMappingsDependency(project: Project, target: MinecraftTarge
 }
 
 class MappingsBuilder internal constructor(
-    private val target: MinecraftTargetInternal,
+    private val target: MinecraftTarget,
     private val project: Project,
 ) {
     private val _isOfficialCompatible: Property<Boolean> =
@@ -188,11 +187,6 @@ class MappingsBuilder internal constructor(
                 "net.neoforged:neoform:$it-$timestamp"
             }
         )
-    }
-
-    @Suppress("UnusedReceiverParameter")
-    fun MinecraftTarget.remapNamespace(namespace: String) {
-        remapNamespaces.add(namespace)
     }
 
     fun custom(dependency: Dependency) {

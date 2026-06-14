@@ -69,21 +69,6 @@ internal abstract class MinecraftTargetInternal(
             javaExecutable.set(project.javaExecutableFor(minecraftVersion, cacheParameters))
         }
 
-    val mappingsBuildDependenciesHolder: Configuration by lazy(LazyThreadSafetyMode.NONE) {
-        val loadMappings = project.dependencies.create(project.files().builtBy(loadMappingsTask))
-        val configuration = project.configurations.detachedConfiguration()
-
-        configuration.dependencies.addAllLater(minecraftVersion.map {
-            if (isUnobfuscatedVersion(it)) {
-                emptyList()
-            } else {
-                listOf(loadMappings)
-            }
-        })
-
-        configuration
-    }
-
     override val accessWideners get() = main.accessWideners
     override val mixins get() = main.mixins
     override val sourceSet get() = main.sourceSet
@@ -132,6 +117,7 @@ internal abstract class MinecraftTargetInternal(
                 throw InvalidUserCodeException("loaderVersion not set for target '${this@MinecraftTargetInternal.name}'")
             }
         }
+
     }
 
     private fun CommonTargetInternal.useCommonMetadata() {

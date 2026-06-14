@@ -69,7 +69,11 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
         resolvableAttributes(::addAttributes)
 
         data.onConfigured {
-            resolvableAttributes(::addAttributes)
+            it.resolvableAttributes(::addAttributes)
+        }
+
+        test.onConfigured {
+            it.resolvableAttributes(::addAttributes)
         }
 
         val emptyList = project.provider { emptyList<Dependency>() }

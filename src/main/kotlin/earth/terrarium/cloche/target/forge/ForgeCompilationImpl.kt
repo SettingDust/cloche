@@ -28,7 +28,7 @@ import javax.inject.Inject
 internal class ForgeCompilationInfo(
     name: String,
     target: ForgeLikeTargetImpl,
-    intermediaryMinecraftClasspath: FileCollection,
+    transformSafeIntermediaryMinecraftClasspath: FileCollection,
     namedMinecraftFile: Provider<RegularFile>,
     data: Boolean,
     test: Boolean,
@@ -36,7 +36,7 @@ internal class ForgeCompilationInfo(
 ) : TargetCompilationInfo<ForgeLikeTargetImpl>(
     name,
     target,
-    intermediaryMinecraftClasspath,
+    transformSafeIntermediaryMinecraftClasspath,
     namedMinecraftFile,
     providerFactory.provider { emptyList() },
     providerFactory.provider { ModDistribution.client },

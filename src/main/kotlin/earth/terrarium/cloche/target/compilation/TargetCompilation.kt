@@ -1,15 +1,30 @@
 package earth.terrarium.cloche.target.compilation
 
 import earth.terrarium.cloche.*
+import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.target.ClocheTarget
+import earth.terrarium.cloche.remap.ClocheClasspathKind
+import earth.terrarium.cloche.remap.ClocheClasspathNormalizationKind
+import earth.terrarium.cloche.remap.ClocheRemapAction
+import earth.terrarium.cloche.remap.ClasspathNormalizationResult
+import earth.terrarium.cloche.remap.isRemappableModArtifactCandidate
+import earth.terrarium.cloche.remap.RemapBucketReport
+import earth.terrarium.cloche.remap.RemapDeclarationReport
+import earth.terrarium.cloche.remap.normalizeModClasspath
+import earth.terrarium.cloche.remap.remapReportFromDecisions
+import earth.terrarium.cloche.remap.ResolvedModArtifact
+import earth.terrarium.cloche.remap.safeGradlePathSegment
+import earth.terrarium.cloche.remap.toResolvedModArtifact
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.addCollectedDependencies
+import earth.terrarium.cloche.tasks.ClocheRemapReport
 import earth.terrarium.cloche.util.fromJars
 import earth.terrarium.cloche.util.optionalDir
+import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
 import net.msrandom.minecraftcodev.accesswidener.AccessWiden
 import net.msrandom.minecraftcodev.core.utils.extension
 import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
@@ -19,16 +34,19 @@ import net.msrandom.minecraftcodev.decompiler.task.Decompile
 import net.msrandom.minecraftcodev.includes.IncludesJar
 import net.msrandom.minecraftcodev.mixins.task.Mixin
 import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
-import net.msrandom.minecraftcodev.remapper.RemapAction
+import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import net.msrandom.minecraftcodev.remapper.task.RemapJar
 import org.gradle.api.NamedDomainObjectProvider
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.DependencyScopeConfiguration
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.attributes.*
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
@@ -43,39 +61,118 @@ import org.gradle.internal.extensions.core.serviceOf
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
+import org.gradle.api.tasks.compile.JavaCompile
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.spongepowered.asm.mixin.MixinEnvironment
+import java.io.File
 import javax.inject.Inject
 
-private fun Project.getUnmappedModFiles(configurationName: String) =
-    filteredClasspathFiles(configurationName, resolvableModConfigurationName(configurationName))
+private fun Project.getUnmappedModFiles(
+    configurationName: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection = files(provider {
+    val classpath = configurations.findByName(resolvableModConfigurationName(configurationName)) ?: return@provider emptySet<File>()
 
-private fun Project.getNonModFiles(configurationName: String) =
-    filteredClasspathFiles(configurationName, resolvableNonModConfigurationName(configurationName))
+    classpath.incoming.artifactView {
+        componentFilter {
+            it !is ProjectComponentIdentifier
+        }
 
-private fun Project.filteredClasspathFiles(configurationName: String, filterConfigurationName: String): FileCollection {
-    val classpath = project.configurations.named(configurationName)
+        attributes {
+            attribute(REMAPPED_ATTRIBUTE, false)
+            attributeAction()
+        }
+    }.artifacts.artifactFiles.files
+})
 
-    val allowedDependencies = project.configurations.named(filterConfigurationName)
+private fun Project.getNonModFiles(
+    configurationName: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+) =
+    files(
+        filteredClasspathFiles(
+            configurationName,
+            resolvableNonModConfigurationName(configurationName),
+            excludedConfigurationNames = rawModProvenanceConfigurationNames(configurationName),
+            attributeAction = attributeAction,
+        ),
+        retainedNonModFilesFromModProvenance(configurationName, attributeAction),
+    )
 
-    return project.files(classpath.zip(allowedDependencies) { classpath, dependencies ->
+private fun rawModProvenanceConfigurationNames(configurationName: String) =
+    listOf(resolvableModConfigurationName(configurationName)) +
+        supportedRemapNamespaces.map { namespace ->
+            namespacedResolvableModConfigurationName(configurationName, namespace)
+        }
+
+private fun Project.retainedNonModFilesFromModProvenance(
+    configurationName: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection = files(provider {
+    rawModProvenanceConfigurationNames(configurationName)
+        .mapNotNull(configurations::findByName)
+        .flatMap { configuration ->
+            configuration.incoming.artifactView {
+                componentFilter { it !is ProjectComponentIdentifier }
+                attributes {
+                    attribute(REMAPPED_ATTRIBUTE, false)
+                    attributeAction()
+                }
+            }.artifacts.artifactFiles.files
+        }
+        .filterNot(File::isRemappableModArtifactCandidate)
+        .map(File::getCanonicalFile)
+        .toSet()
+})
+
+private fun Project.filteredClasspathFiles(
+    configurationName: String,
+    filterConfigurationName: String,
+    excludedConfigurationNames: List<String> = emptyList(),
+    attributeAction: AttributeContainer.() -> Unit = {},
+    componentPredicate: (ComponentIdentifier) -> Boolean = { true },
+): FileCollection {
+    return project.files(project.provider {
+        val classpath = project.configurations.findByName(configurationName) ?: return@provider emptySet<File>()
+        val dependencies = project.configurations.findByName(filterConfigurationName) ?: return@provider emptySet<File>()
         val resolutionResult = dependencies.incoming.resolutionResult
 
         val componentIdentifiers =
             resolutionResult.allComponents.map(ResolvedComponentResult::getId) - resolutionResult.root.id
 
+        val excludedConfigurations = excludedConfigurationNames.mapNotNull(project.configurations::findByName)
+        val excludedFiles = excludedConfigurations
+            .flatMap { excludedConfiguration ->
+                excludedConfiguration.incoming.artifactView {
+                    componentFilter { it !is ProjectComponentIdentifier }
+
+                    attributes {
+                        attribute(REMAPPED_ATTRIBUTE, false)
+                        attributeAction()
+                    }
+                }.artifacts.artifactFiles.files
+            }
+            .filter(File::isRemappableModArtifactCandidate)
+            .map(File::getCanonicalFile)
+            .toSet()
+
         val filteredIdentifiers = componentIdentifiers.filter { it !is ProjectComponentIdentifier }
 
         classpath.incoming.artifactView {
-            componentFilter(filteredIdentifiers::contains)
+            componentFilter { it in filteredIdentifiers && componentPredicate(it) }
 
             attributes {
                 attribute(REMAPPED_ATTRIBUTE, false)
+                attributeAction()
             }
-        }.artifacts.artifactFiles
+        }.artifacts.artifactFiles.files.filter { it.canonicalFile !in excludedFiles }
     })
 }
 
-private fun Project.getUnmappedClasspath(configurationName: String): FileCollection {
+private fun Project.getUnmappedClasspath(
+    configurationName: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection {
     val classpath = project.configurations.named(configurationName)
 
     return project.files(classpath.map { classpath ->
@@ -86,12 +183,16 @@ private fun Project.getUnmappedClasspath(configurationName: String): FileCollect
 
             attributes {
                 attribute(REMAPPED_ATTRIBUTE, false)
+                attributeAction()
             }
         }.artifacts.artifactFiles
     })
 }
 
-private fun Project.getMappedClasspath(configurationName: String): FileCollection {
+private fun Project.getMappedClasspath(
+    configurationName: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection {
     val classpath = project.configurations.named(configurationName)
 
     return project.files(classpath.map { classpath ->
@@ -102,27 +203,260 @@ private fun Project.getMappedClasspath(configurationName: String): FileCollectio
 
             attributes {
                 attribute(REMAPPED_ATTRIBUTE, true)
+                attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+                attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+                attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+                attributeAction()
             }
         }.artifacts.artifactFiles
     })
 }
 
-private fun Project.getAccessWidenerClasspath(configurationName: String, remapped: Provider<Boolean>): FileCollection {
-    val classpath = project.configurations.named(configurationName)
+private val supportedRemapNamespaces = listOf(
+    RemapNamespaceAttribute.INITIAL,
+    RemapNamespaceAttribute.INTERMEDIARY,
+    RemapNamespaceAttribute.SEARGE,
+    RemapNamespaceAttribute.OBF,
+)
 
-    return project.files(classpath.map { classpath ->
-        classpath.incoming.artifactView {
-            componentFilter {
-                it !is ProjectComponentIdentifier
+internal fun remapSourceNamespaces(defaultNamespace: String): Set<String> =
+    (supportedRemapNamespaces + defaultNamespace)
+        .filter(String::isNotEmpty)
+        .toSet()
+
+private fun Project.getNamespacedMappedClasspath(
+    configurationName: String,
+    sourceNamespace: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection {
+    val classpath = configurations.findByName(namespacedResolvableModConfigurationName(configurationName, sourceNamespace))
+        ?: return files()
+
+    return classpath.incoming.artifactView {
+        componentFilter {
+            it !is ProjectComponentIdentifier
+        }
+
+        attributes {
+            attributeAction()
+            attribute(REMAPPED_ATTRIBUTE, true)
+            attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, sourceNamespace)
+            attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+        }
+    }.artifacts.artifactFiles.filter(File::isRemappableModArtifactCandidate)
+}
+
+private fun Project.getNamespacedUnmappedModFiles(
+    configurationName: String,
+    namespace: String,
+    attributeAction: AttributeContainer.() -> Unit = {},
+): FileCollection {
+    val classpath = configurations.findByName(namespacedResolvableModConfigurationName(configurationName, namespace))
+        ?: return files()
+
+    return classpath.incoming.artifactView {
+        componentFilter {
+            it !is ProjectComponentIdentifier
+        }
+
+        attributes {
+            attributeAction()
+            attribute(REMAPPED_ATTRIBUTE, false)
+            attribute(RemapNamespaceAttribute.ATTRIBUTE, namespace)
+            attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, namespace)
+            attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, namespace)
+        }
+    }.artifacts.artifactFiles
+}
+
+private fun TargetCompilation<*>.getNamespacedMappedClasspaths(configurationName: String): FileCollection =
+    project.files(
+        supportedRemapNamespaces.map { namespace ->
+            project.getNamespacedMappedClasspath(configurationName, namespace) { resolvableAttributes(this) }
+        },
+        target.modRemapNamespace.map { namespace ->
+            if (namespace.isNotEmpty() && namespace !in supportedRemapNamespaces) {
+                project.getNamespacedMappedClasspath(configurationName, namespace) { resolvableAttributes(this) }
+            } else {
+                project.files()
             }
+        }
+    )
+
+private fun TargetCompilation<*>.getNamespacedUnmappedModClasspaths(configurationName: String): FileCollection =
+    project.files(
+        supportedRemapNamespaces.map { namespace ->
+            project.getNamespacedUnmappedModFiles(configurationName, namespace) { resolvableAttributes(this) }
+        },
+        target.modRemapNamespace.map { namespace ->
+            if (namespace.isNotEmpty() && namespace !in supportedRemapNamespaces) {
+                project.getNamespacedUnmappedModFiles(configurationName, namespace) { resolvableAttributes(this) }
+            } else {
+                project.files()
+            }
+        }
+    )
+
+private fun TargetCompilation<*>.normalizeModClasspath(
+    configurationName: String,
+    classpathKind: ClocheClasspathKind,
+    normalizationKind: ClocheClasspathNormalizationKind,
+    consumerClasspathNamespace: String = MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE,
+): FileCollection {
+    return project.objects.fileCollection()
+        .from(project.provider {
+            modClasspathDiagnostics(configurationName, classpathKind, normalizationKind, consumerClasspathNamespace).result.files
+        })
+}
+
+private data class ModClasspathDiagnostics(
+    val rawArtifacts: List<ResolvedModArtifact>,
+    val remappedArtifacts: List<ResolvedModArtifact>,
+    val result: ClasspathNormalizationResult,
+)
+
+private fun TargetCompilation<*>.modClasspathDiagnostics(
+    configurationName: String,
+    classpathKind: ClocheClasspathKind,
+    normalizationKind: ClocheClasspathNormalizationKind,
+    consumerClasspathNamespace: String = MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE,
+): ModClasspathDiagnostics {
+    val rawArtifacts = mutableListOf<ResolvedModArtifact>()
+    val remappedArtifacts = mutableListOf<ResolvedModArtifact>()
+    val decisions = sourceNamespaces.get().flatMap { sourceNamespace ->
+        val classpath = project.configurations.findByName(
+            namespacedResolvableModConfigurationName(configurationName, sourceNamespace)
+        ) ?: return@flatMap emptyList()
+
+        val sourceRawArtifacts = classpath.incoming.artifactView {
+            componentFilter { it !is ProjectComponentIdentifier }
 
             attributes {
-                attributeProvider(REMAPPED_ATTRIBUTE, remapped)
-                attribute(RemapNamespaceAttribute.ATTRIBUTE, "named")
+                resolvableAttributes(this)
+                attribute(REMAPPED_ATTRIBUTE, false)
+                attribute(RemapNamespaceAttribute.ATTRIBUTE, sourceNamespace)
+                attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, sourceNamespace)
+                attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, sourceNamespace)
+                attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, consumerClasspathNamespace)
             }
-        }.artifacts.artifactFiles
-    })
+        }.artifacts.artifacts
+            .filter { artifact -> artifact.file.isRemappableModArtifactCandidate() }
+            .map { artifact -> artifact.toResolvedModArtifact(sourceNamespace, consumerClasspathNamespace, classpathKind) }
+
+        val sourceRemappedArtifacts = classpath.incoming.artifactView {
+            componentFilter { it !is ProjectComponentIdentifier }
+
+            attributes {
+                resolvableAttributes(this)
+                attribute(REMAPPED_ATTRIBUTE, true)
+                attribute(RemapNamespaceAttribute.ATTRIBUTE, consumerClasspathNamespace)
+                attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, sourceNamespace)
+                attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, consumerClasspathNamespace)
+                attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, consumerClasspathNamespace)
+            }
+        }.artifacts.artifacts
+            .filter { artifact -> artifact.file.isRemappableModArtifactCandidate() }
+            .map { artifact -> artifact.toResolvedModArtifact(sourceNamespace, consumerClasspathNamespace, classpathKind) }
+
+        rawArtifacts += sourceRawArtifacts
+        remappedArtifacts += sourceRemappedArtifacts
+        normalizeModClasspath(normalizationKind, sourceRawArtifacts, sourceRemappedArtifacts).decisions
+    }
+
+    return ModClasspathDiagnostics(
+        rawArtifacts = rawArtifacts,
+        remappedArtifacts = remappedArtifacts,
+        result = ClasspathNormalizationResult(normalizationKind, decisions),
+    )
 }
+
+private fun TargetCompilation<*>.registerRemapReportTask(): TaskProvider<ClocheRemapReport> {
+    val taskName = lowerCamelCaseGradleName("cloche", target.featureName, collapsedName, "remapReport")
+    val reportTask = project.tasks.register<ClocheRemapReport>(taskName) {
+        outputDirectory.set(project.layout.buildDirectory.dir("reports/cloche/remap/${target.name.safeGradlePathSegment()}/$namePath"))
+        report.set(project.provider {
+            val consumerNamespace = MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE
+            val compileDiagnostics = modClasspathDiagnostics(
+                sourceSet.compileClasspathConfigurationName,
+                ClocheClasspathKind.Compile,
+                ClocheClasspathNormalizationKind.Compile,
+                consumerNamespace,
+            )
+            val runtimeDiagnostics = modClasspathDiagnostics(
+                sourceSet.runtimeClasspathConfigurationName,
+                ClocheClasspathKind.Runtime,
+                ClocheClasspathNormalizationKind.Runtime,
+                consumerNamespace,
+            )
+            val declarations = sourceNamespaces.get().flatMap { namespace ->
+                val bucketName = namespacedModConfigurationName(sourceSet.compileClasspathConfigurationName, namespace)
+                val bucket = project.configurations.findByName(bucketName)
+                bucket.orEmptyDependencies().map { dependency ->
+                    RemapDeclarationReport(
+                        displayName = dependency.toString(),
+                        declaredSourceNamespace = null,
+                        effectiveSourceNamespace = namespace,
+                        bucket = bucketName,
+                    )
+                }
+            }
+            val buckets = sourceNamespaces.get().flatMap { namespace ->
+                listOf(
+                    bucketReport(sourceSet.compileClasspathConfigurationName, namespace, "compile"),
+                    bucketReport(sourceSet.runtimeClasspathConfigurationName, namespace, "runtime"),
+                )
+            }
+
+            remapReportFromDecisions(
+                target = target.name,
+                compilation = name,
+                consumerClasspathNamespace = consumerNamespace,
+                declarations = declarations,
+                buckets = buckets,
+                rawArtifacts = compileDiagnostics.rawArtifacts + runtimeDiagnostics.rawArtifacts,
+                remappedArtifacts = compileDiagnostics.remappedArtifacts + runtimeDiagnostics.remappedArtifacts,
+                retainedNonModLibraries = (
+                    project.retainedNonModFilesFromModProvenance(sourceSet.compileClasspathConfigurationName) {
+                        resolvableAttributes(this)
+                    }.files +
+                        project.retainedNonModFilesFromModProvenance(sourceSet.runtimeClasspathConfigurationName) {
+                            resolvableAttributes(this)
+                        }.files
+                    ).toList(),
+                classpathResults = listOf(compileDiagnostics.result, runtimeDiagnostics.result),
+            )
+        })
+    }
+    project.tasks.named("clocheRemapReport") {
+        dependsOn(reportTask)
+    }
+    return reportTask
+}
+
+private fun Configuration?.orEmptyDependencies() = this?.dependencies.orEmpty()
+
+private fun TargetCompilation<*>.bucketReport(
+    configurationName: String,
+    namespace: String,
+    classpathKind: String,
+) = RemapBucketReport(
+    name = namespacedModConfigurationName(configurationName, namespace),
+    sourceNamespace = namespace,
+    classpathKind = classpathKind,
+    dependencyCount = project.configurations.findByName(namespacedModConfigurationName(configurationName, namespace))?.dependencies?.size ?: 0,
+)
+
+private fun Project.getAccessWidenerClasspath(
+    configurationName: String,
+    sourceNamespaces: Provider<Set<String>>,
+    attributeAction: AttributeContainer.() -> Unit,
+): FileCollection = files(sourceNamespaces.map { namespaces ->
+    namespaces.map { namespace ->
+        getNamespacedMappedClasspath(configurationName, namespace, attributeAction)
+    }
+})
 
 data class FinalJarTasks(
     val accessWidenTask: TaskProvider<AccessWiden>,
@@ -140,6 +474,8 @@ internal fun registerCompilationTransformations(
     target: MinecraftTargetInternal,
     compilationName: String,
     sourceSet: SourceSet,
+    sourceNamespaces: Provider<Set<String>>,
+    resolvableAttributeAction: AttributeContainer.() -> Unit,
     namedMinecraftFile: Provider<RegularFile>,
     extraClasspathFiles: Provider<List<RegularFile>>,
     side: Provider<ModDistribution>
@@ -151,7 +487,8 @@ internal fun registerCompilationTransformations(
     val project = target.project
     val accessWidenerClasspath = project.getAccessWidenerClasspath(
         sourceSet.compileClasspathConfigurationName,
-        target.minecraftVersion.map { !isUnobfuscatedVersion(it) },
+        sourceNamespaces,
+        resolvableAttributeAction,
     )
 
     val accessWidenTask = project.tasks.register<AccessWiden>(
@@ -247,26 +584,28 @@ private fun setupModTransformationPipeline(
 ) {
     // afterEvaluate needed as the registration of a transform is dependent on a lazy provider
     project.afterEvaluate {
-        for (remapNamespace in target.mappings.remapNamespaces.get()) {
-            val namespace =
-                remapNamespace.takeUnless { it == RemapNamespaceAttribute.INITIAL } ?: target.modRemapNamespace.get()
+        val outputNamespace = MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE
+        val remapNamespaces = compilation.sourceNamespaces.get()
 
-            // When modRemapNamespace is empty, default deps don't need remapping.
-            // Register NoopAction to provide an exact match (namespace=INITIAL) so that
-            // default deps pass through, while cross-namespace deps (e.g., INTERMEDIARY)
-            // still get remapped via RemapAction.
-            if (namespace.isEmpty()) {
+        for (remapNamespace in remapNamespaces) {
+            if (remapNamespace == RemapNamespaceAttribute.INITIAL) {
                 project.dependencies.registerTransform(NoopAction::class) {
                     from
                         .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
                         .attribute(REMAPPED_ATTRIBUTE, false)
-                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, outputNamespace)
                         .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
                     to
                         .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
                         .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+                        .attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, outputNamespace)
+                        .attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, outputNamespace)
                         .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
                     compilation.baseAttributes(from)
@@ -276,17 +615,23 @@ private fun setupModTransformationPipeline(
                 continue
             }
 
-            project.dependencies.registerTransform(RemapAction::class) {
+            project.dependencies.registerTransform(ClocheRemapAction::class) {
                 from
-                    .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                    .attribute(REMAPPED_ATTRIBUTE, false)
-                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-                    .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
+                        .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        .attribute(REMAPPED_ATTRIBUTE, false)
+                        .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, remapNamespace)
+                        .attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, outputNamespace)
+                        .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
                 to
                     .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
                     .attribute(REMAPPED_ATTRIBUTE, true)
-                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                    .attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+                    .attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, remapNamespace)
+                    .attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, outputNamespace)
+                    .attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, outputNamespace)
                     .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
 
                 // TODO Is the usage of the base attributes correct here?
@@ -294,35 +639,57 @@ private fun setupModTransformationPipeline(
                 compilation.baseAttributes(to)
 
                 parameters {
-                    val compileClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.compileClasspathConfigurationName)
-
-                    val runtimeClasspath =
-                        project.getUnmappedClasspath(compilation.sourceSet.runtimeClasspathConfigurationName)
-
                     val remapClasspath =
-                        project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name)
+                        project.getUnmappedClasspath(compilation.remapClasspathConfiguration.name) {
+                            attribute(RemapNamespaceAttribute.ATTRIBUTE, remapNamespace)
+                        }
 
                     val nonModCompileClasspath =
-                        project.getNonModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                        project.getNonModFiles(compilation.sourceSet.compileClasspathConfigurationName) {
+                            compilation.resolvableAttributes(this)
+                        }
 
                     val nonModRuntimeClasspath =
-                        project.getNonModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                        project.getNonModFiles(compilation.sourceSet.runtimeClasspathConfigurationName) {
+                            compilation.resolvableAttributes(this)
+                        }
 
-                    val modCompileClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.compileClasspathConfigurationName)
+                    val modCompileClasspath = project.getNamespacedUnmappedModFiles(
+                        compilation.sourceSet.compileClasspathConfigurationName,
+                        remapNamespace
+                    ) {
+                        compilation.resolvableAttributes(this)
+                    }
 
-                    val modRuntimeClasspath =
-                        project.getUnmappedModFiles(compilation.sourceSet.runtimeClasspathConfigurationName)
+                    val modRuntimeClasspath = project.getNamespacedUnmappedModFiles(
+                        compilation.sourceSet.runtimeClasspathConfigurationName,
+                        remapNamespace
+                    ) {
+                        compilation.resolvableAttributes(this)
+                    }
 
-                    mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
+                    val mappingConfiguration = project.configurations.named(target.sourceSet.mappingsConfigurationName)
+                    val resolvedMappingArtifacts = project.provider {
+                        mappingConfiguration.get()
+                            .incoming
+                            .artifactView {
+                                componentFilter { it is ModuleComponentIdentifier }
+                            }
+                            .files
+                            .files
+                            .filter(File::isFile)
+                    }
 
-                    sourceNamespace.set(namespace)
+                    mappingArtifacts.from(resolvedMappingArtifacts)
 
-                    extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
+                    javaExecutable.set(target.loadMappingsTask.flatMap(LoadMappings::javaExecutable))
+                    versionManifestUrl.set(VERSION_MANIFEST_URL)
+                    offline.set(project.gradle.startParameter.isOffline)
+
+                    sourceNamespace.set(remapNamespace)
+
+                    extraClasspath.from(compilation.info.transformSafeIntermediaryMinecraftClasspath)
                     extraClasspath.from(remapClasspath)
-                    extraClasspath.from(compileClasspath)
-                    extraClasspath.from(runtimeClasspath)
 
                     cacheDirectory.set(getGlobalCacheDirectory(project))
 
@@ -340,7 +707,15 @@ private fun setupModTransformationPipeline(
 internal open class TargetCompilationInfo<T : MinecraftTargetInternal>(
     val name: String,
     val target: T,
-    val intermediaryMinecraftClasspath: FileCollection,
+    /**
+     * Minecraft jars used as secondary inputs by ClocheRemapAction.
+     *
+     * This classpath must be transform-safe: use already-resolved/cache files or files resolved
+     * through Gradle artifact/configuration boundaries that carry producer task dependencies.
+     * Do not pass direct task output FileCollections here, because artifact transforms may run
+     * during dependency resolution without scheduling hidden TransformParameters producers.
+     */
+    val transformSafeIntermediaryMinecraftClasspath: FileCollection,
     val namedMinecraftFile: Provider<RegularFile>,
     val extraClasspathFiles: Provider<List<RegularFile>>,
     val side: Provider<ModDistribution>,
@@ -366,10 +741,14 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val modOutputs = project.files(sourceSet.output)
 
+    internal val sourceNamespaces: Provider<Set<String>> = target.modRemapNamespace.map(::remapSourceNamespaces)
+
     protected val setupFiles = registerCompilationTransformations(
         _info.target,
         _info.name,
         sourceSet,
+        sourceNamespaces,
+        { resolvableAttributes(this) },
         _info.namedMinecraftFile,
         _info.extraClasspathFiles,
         _info.side,
@@ -454,7 +833,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             destinationDirectory.set(project.cloche.intermediateOutputsDirectory)
             input.set(jarFile)
             sourceNamespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
-            targetNamespace.set(target.modRemapNamespace)
+            targetNamespace.set(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
             classpath.from(sourceSet.compileClasspath)
 
             mappings.set(target.loadMappingsTask.flatMap(LoadMappings::output))
@@ -473,17 +852,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             destinationDirectory.set(project.cloche.finalOutputsDirectory)
 
             val jar = project.tasks.named<Jar>(sourceSet.jarTaskName)
-            val remapped = target.modRemapNamespace.map(String::isNotEmpty)
-
-            val jarFile = remapped.flatMap {
-                val jarTask = if (it) {
-                    remapJarTask!!
-                } else {
-                    jar
-                }
-
-                jarTask.flatMap(Jar::getArchiveFile)
-            }
+            val jarFile = jar.flatMap(Jar::getArchiveFile)
 
             input.set(jarFile)
             manifest.fromJars(project.serviceOf(), jarFile)
@@ -496,17 +865,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     init {
         setupModTransformationPipeline(project, _info.target, this)
-
-        val minecraftBuildDependenciesHolder: Configuration =
-            project.configurations.detachedConfiguration(
-                project.dependencies.create(
-                    project.files().builtBy(_info.intermediaryMinecraftClasspath)
-                )
-            )
-
-        val remapClasspathDependencies = project.configurations.detachedConfiguration(
-            project.dependencies.create(project.files().builtBy(remapClasspathConfiguration))
-        )
+        registerRemapReportTask()
 
         project.configurations.named(sourceSet.compileClasspathConfigurationName) {
             attributes.attributeProvider(
@@ -514,13 +873,10 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-
-            extendsFrom(
-                target.mappingsBuildDependenciesHolder,
-                minecraftBuildDependenciesHolder,
-                remapClasspathDependencies
-            )
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attributes.attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
         }
 
         project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
@@ -529,13 +885,10 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
-            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-
-            extendsFrom(
-                target.mappingsBuildDependenciesHolder,
-                minecraftBuildDependenciesHolder,
-                remapClasspathDependencies
-            )
+            attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+            attributes.attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
+            attributes.attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
         }
 
         setupFiles.accessWidenTask.configure {
@@ -545,12 +898,56 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         val compileMinecraftFiles = project.files(setupFiles.accessWidenTask, _info.extraClasspathFiles)
         val compileMinecraftConfiguration =
             project.configurations.detachedConfiguration(project.dependencies.create(compileMinecraftFiles))
-        sourceSet.compileClasspath += compileMinecraftConfiguration
+        val originalCompileClasspath = sourceSet.compileClasspath
+        val normalizedModCompileClasspath = normalizeModClasspath(
+            sourceSet.compileClasspathConfigurationName,
+            ClocheClasspathKind.Compile,
+            ClocheClasspathNormalizationKind.Compile,
+        )
+        val sourceAndProjectOutputClasspath = originalCompileClasspath.filter { it.isDirectory }
+        val nonModCompileClasspath = project.getNonModFiles(sourceSet.compileClasspathConfigurationName) {
+            resolvableAttributes(this)
+        }
+        val sanitizedCompileClasspath = project.files(
+            sourceAndProjectOutputClasspath,
+            compileMinecraftConfiguration,
+            normalizedModCompileClasspath,
+            nonModCompileClasspath,
+        )
+
+        sourceSet.compileClasspath = sanitizedCompileClasspath
+
+        project.tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
+            classpath = sanitizedCompileClasspath
+        }
+
+        project.plugins.withId(KOTLIN_JVM_PLUGIN_ID) {
+            project.tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
+                libraries.setFrom(sanitizedCompileClasspath)
+            }
+        }
 
         val runtimeMinecraftFiles = project.files(finalMinecraftFile, _info.extraClasspathFiles)
         val runtimeMinecraftConfiguration =
             project.configurations.detachedConfiguration(project.dependencies.create(runtimeMinecraftFiles))
-        sourceSet.runtimeClasspath += runtimeMinecraftConfiguration
+        val originalRuntimeClasspath = sourceSet.runtimeClasspath
+        val normalizedModRuntimeClasspath = normalizeModClasspath(
+            sourceSet.runtimeClasspathConfigurationName,
+            ClocheClasspathKind.Runtime,
+            ClocheClasspathNormalizationKind.Runtime,
+        )
+        val runtimeSourceAndProjectOutputClasspath = originalRuntimeClasspath.filter { it.isDirectory }
+        val nonModRuntimeClasspath = project.getNonModFiles(sourceSet.runtimeClasspathConfigurationName) {
+            resolvableAttributes(this)
+        }
+        val sanitizedRuntimeClasspath = project.files(
+            runtimeSourceAndProjectOutputClasspath,
+            runtimeMinecraftConfiguration,
+            normalizedModRuntimeClasspath,
+            nonModRuntimeClasspath,
+        )
+
+        sourceSet.runtimeClasspath = sanitizedRuntimeClasspath
     }
 
     override fun getName() = _info.name

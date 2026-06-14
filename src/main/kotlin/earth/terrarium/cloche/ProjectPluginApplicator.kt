@@ -110,11 +110,28 @@ fun applyToProject(target: Project) {
         attribute(CommonTargetAttributes.NAME)
 
         attribute(REMAPPED_ATTRIBUTE)
+        attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE)
+        attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE)
+        attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE)
+        listOf(
+            REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE,
+            REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE,
+            REMAP_CONSUMER_NAMESPACE_ATTRIBUTE,
+        ).forEach { internalRemapAttribute ->
+            attribute(internalRemapAttribute) {
+                compatibilityRules.add(InternalRemapNamespaceCompatibilityRule::class)
+                disambiguationRules.add(InternalRemapNamespaceDisambiguationRule::class)
+            }
+        }
         attribute(NO_NAME_MAPPING_ATTRIBUTE)
         attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE)
         attribute(IncludeTransformationStateAttribute.ATTRIBUTE)
 
         attribute(RemapNamespaceAttribute.ATTRIBUTE)
+        attribute(RemapNamespaceAttribute.ATTRIBUTE) {
+            compatibilityRules.add(RemapNamespaceCompatibilityRule::class)
+            disambiguationRules.add(RemapNamespaceDisambiguationRule::class)
+        }
     }
 
     target.dependencies.artifactTypes {
@@ -124,6 +141,8 @@ fun applyToProject(target: Project) {
                 .attribute(NO_NAME_MAPPING_ATTRIBUTE, false)
                 .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, IncludeTransformationStateAttribute.None)
                 .attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                .attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+                .attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
                 .attribute(ClocheTargetAttribute.ATTRIBUTE, ClocheTargetAttribute.INITIAL)
         }
     }
@@ -141,6 +160,11 @@ fun applyToProject(target: Project) {
 
     target.tasks.register(IDE_SYNC_TASK_NAME) {
         dependsOn(writeModId)
+    }
+
+    target.tasks.register("clocheRemapReport") {
+        group = "cloche diagnostics"
+        description = "Writes all Cloche remap namespace diagnostics reports."
     }
 
     target.ideSyncHook()

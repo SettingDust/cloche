@@ -4,6 +4,7 @@ import earth.terrarium.cloche.*
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.target.compilation.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import earth.terrarium.cloche.util.optionalDir
@@ -21,7 +22,10 @@ import net.msrandom.minecraftcodev.runs.task.ExtractNatives
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
+import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.dsl.DependencyCollector
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.RegularFile
@@ -64,11 +68,223 @@ fun Project.javaExecutableFor(
 private fun TargetCompilation<*>.addModDependencies(configurationName: String, collector: DependencyCollector, modCollector: DependencyCollector) {
     project.configurations.dependencyScope(modConfigurationName(configurationName)) {
         addCollectedDependencies(modCollector)
+
+        attributes
+            .remapped(false)
     }
 
     project.configurations.named(configurationName) {
         addCollectedDependencies(collector)
     }
+}
+
+private val supportedRemapNamespaces = listOf(
+    RemapNamespaceAttribute.INITIAL,
+    RemapNamespaceAttribute.INTERMEDIARY,
+    RemapNamespaceAttribute.SEARGE,
+    RemapNamespaceAttribute.OBF,
+)
+
+@Suppress("DEPRECATION")
+private fun Dependency.remapNamespaceOrNull(): String? =
+    (this as? ExternalModuleDependency)
+        ?.attributes
+        ?.getAttribute(RemapNamespaceAttribute.ATTRIBUTE)
+
+private fun Project.copyDependencyToNamespaceBucket(
+    dependency: Dependency,
+    bucket: Configuration,
+) {
+    bucket.dependencies.add(dependency.copyWithoutPublicRemapNamespace(project))
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun AttributeContainer.copyAttributeFrom(source: AttributeContainer, attribute: Attribute<*>) {
+    val typedAttribute = attribute as Attribute<Any>
+
+    source.getAttribute(typedAttribute)?.let { value ->
+        attribute(typedAttribute, value)
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun Dependency.copyWithoutPublicRemapNamespace(project: Project): Dependency {
+    if (this !is ExternalModuleDependency || attributes.getAttribute(RemapNamespaceAttribute.ATTRIBUTE) == null) {
+        return copy()
+    }
+
+    val notation = mutableMapOf<String, String>("name" to name)
+
+    group?.let { notation["group"] = it }
+    version?.let { notation["version"] = it }
+
+    val copy = project.dependencies.create(notation) as ExternalModuleDependency
+
+    copy.isTransitive = isTransitive
+    copy.isChanging = isChanging
+
+    copy.version {
+        versionConstraint.branch?.let { branch = it }
+        if (versionConstraint.requiredVersion.isNotEmpty()) {
+            require(versionConstraint.requiredVersion)
+        }
+        if (versionConstraint.preferredVersion.isNotEmpty()) {
+            prefer(versionConstraint.preferredVersion)
+        }
+        if (versionConstraint.strictVersion.isNotEmpty()) {
+            strictly(versionConstraint.strictVersion)
+        }
+        if (versionConstraint.rejectedVersions.isNotEmpty()) {
+            reject(*versionConstraint.rejectedVersions.toTypedArray())
+        }
+    }
+
+    reason?.let(copy::because)
+
+    targetConfiguration?.let { copy.targetConfiguration = it }
+
+    attributes.keySet().forEach { attribute ->
+        if (attribute != RemapNamespaceAttribute.ATTRIBUTE) {
+            copy.attributes.copyAttributeFrom(attributes, attribute)
+        }
+    }
+
+    artifacts.forEach { artifact ->
+        copy.artifact {
+            name = artifact.name
+            type = artifact.type
+            extension = artifact.extension
+            classifier = artifact.classifier
+            url = artifact.url
+        }
+    }
+
+    requestedCapabilities.forEach { capability ->
+        copy.capabilities {
+            val version = capability.version
+
+            requireCapability(
+                if (version == null) {
+                    "${capability.group}:${capability.name}"
+                } else {
+                    "${capability.group}:${capability.name}:$version"
+                }
+            )
+        }
+    }
+
+    if (isEndorsingStrictVersions) {
+        copy.endorseStrictVersions()
+    } else {
+        copy.doNotEndorseStrictVersions()
+    }
+
+    excludeRules.forEach { rule ->
+        copy.exclude(
+            buildMap {
+                rule.group?.let { put("group", it) }
+                rule.module?.let { put("module", it) }
+            }
+        )
+    }
+
+    return copy
+}
+
+private fun Configuration.allDependenciesRecursive(visited: MutableSet<Configuration> = mutableSetOf()): Sequence<Dependency> {
+    if (!visited.add(this)) {
+        return emptySequence()
+    }
+
+    return dependencies.asSequence() + extendsFrom.asSequence().flatMap { it.allDependenciesRecursive(visited) }
+}
+
+private fun TargetCompilation<*>.configureNamespaceBuckets(
+    classpathConfigurationName: String,
+    defaultNamespace: Provider<String>,
+    explicitSourceNamespaceCollectors: Collection<DependencyCollector>,
+    extendClasspath: Configuration.() -> Unit,
+) {
+    val dependencyBuckets = linkedMapOf<String, Provider<out Configuration>>()
+
+    fun namespaceBucket(namespace: String): Provider<out Configuration> =
+        dependencyBuckets.getOrPut(namespace) {
+            val dependencyBucket = project.configurations.dependencyScope(namespacedModConfigurationName(classpathConfigurationName, namespace)) {
+                isCanBeDeclared = true
+                isCanBeResolved = false
+                isCanBeConsumed = false
+                isVisible = false
+                isTransitive = false
+
+                attributes.artifactSourceNamespace(namespace)
+                attributes.artifactNamespace(namespace)
+            }
+
+            project.configurations.resolvable(namespacedResolvableModConfigurationName(classpathConfigurationName, namespace)) {
+                isCanBeDeclared = false
+                isCanBeResolved = true
+                isCanBeConsumed = false
+                isVisible = false
+
+                shouldResolveConsistentlyWith(project.configurations.getByName(classpathConfigurationName))
+                extendsFrom(dependencyBucket.get())
+
+                attributes
+                    .remapped(false)
+                    .artifactSourceNamespace(namespace)
+                    .artifactNamespace(namespace)
+
+                @Suppress("DEPRECATION")
+                attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+
+                attributes {
+                    resolvableAttributes(this)
+                }
+            }
+
+            dependencyBucket
+        }
+
+    val allModDependencies = project.configurations.resolvable(resolvableModConfigurationName(classpathConfigurationName)) {
+        shouldResolveConsistentlyWith(project.configurations.getByName(classpathConfigurationName))
+
+        attributes {
+            resolvableAttributes(this)
+            remapped(false)
+        }
+
+        extendClasspath()
+    }
+
+    fun routeDependencies() {
+        val fallbackNamespace = defaultNamespace.get().ifEmpty { RemapNamespaceAttribute.INITIAL }
+        val explicitDependencies = dependencyHandler.declaredModDependenciesFor(explicitSourceNamespaceCollectors)
+        val explicitDependencyObjects = explicitDependencies.mapTo(hashSetOf()) { it.dependency }
+
+        explicitDependencies.forEach { declaration ->
+            project.copyDependencyToNamespaceBucket(
+                declaration.dependency,
+                namespaceBucket(declaration.sourceNamespace).get(),
+            )
+        }
+
+        allModDependencies.get().allDependenciesRecursive().forEach { dependency ->
+            if (dependency in explicitDependencyObjects) {
+                return@forEach
+            }
+
+            val namespace = dependency.remapNamespaceOrNull() ?: fallbackNamespace
+
+            if (namespace.isNotEmpty()) {
+                project.copyDependencyToNamespaceBucket(dependency, namespaceBucket(namespace).get())
+            }
+        }
+    }
+
+    project.afterEvaluate {
+        routeDependencies()
+    }
+
 }
 
 @Suppress("UnstableApiUsage")
@@ -127,24 +343,40 @@ private fun TargetCompilation<*>.addDependencies() {
         }
     }
 
-    project.configurations.resolvable(resolvableModConfigurationName(sourceSet.compileClasspathConfigurationName)) {
-        isTransitive = false
-
-        shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
-
+    configureNamespaceBuckets(
+        sourceSet.compileClasspathConfigurationName,
+        target.modRemapNamespace,
+        listOf(
+            dependencyHandler.modImplementation,
+            dependencyHandler.modCompileOnly,
+            dependencyHandler.modLocalImplementation,
+            dependencyHandler.modCompileOnlyApi,
+            dependencyHandler.modApi,
+        ),
+    ) {
         extendModCompileClasspath()
     }
 
-    project.configurations.resolvable(resolvableModConfigurationName(sourceSet.runtimeClasspathConfigurationName)) {
-        isTransitive = false
-
-        shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
-
+    configureNamespaceBuckets(
+        sourceSet.runtimeClasspathConfigurationName,
+        target.modRemapNamespace,
+        listOf(
+            dependencyHandler.modImplementation,
+            dependencyHandler.modRuntimeOnly,
+            dependencyHandler.modLocalRuntime,
+            dependencyHandler.modLocalImplementation,
+            dependencyHandler.modApi,
+        ),
+    ) {
         extendModRuntimeClasspath()
     }
 
     project.configurations.resolvable(resolvableNonModConfigurationName(sourceSet.compileClasspathConfigurationName)) {
         shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
+
+        attributes {
+            resolvableAttributes(this)
+        }
 
         extendsFrom(project.configurations.getByName(sourceSet.compileOnlyConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
@@ -159,6 +391,10 @@ private fun TargetCompilation<*>.addDependencies() {
     project.configurations.resolvable(resolvableNonModConfigurationName(sourceSet.runtimeClasspathConfigurationName)) {
         shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
+        attributes {
+            resolvableAttributes(this)
+        }
+
         extendsFrom(project.configurations.getByName(sourceSet.runtimeOnlyConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
 
@@ -171,16 +407,14 @@ private fun TargetCompilation<*>.addDependencies() {
     }
 
     project.configurations.named(sourceSet.compileClasspathConfigurationName) {
-        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
-
         extendModCompileClasspath()
+        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
     }
 
     project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
+        extendModRuntimeClasspath()
         extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.localRuntimeConfigurationName))
-
-        extendModRuntimeClasspath()
     }
 
     if (!isTest) {

@@ -5,6 +5,7 @@ package earth.terrarium.cloche.target.common
 import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
 import earth.terrarium.cloche.JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR
 import earth.terrarium.cloche.KOTLIN_MULTIPLATFORM_STUB_PLUGIN
+import earth.terrarium.cloche.REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE
 import earth.terrarium.cloche.addClasspathDependency
 import earth.terrarium.cloche.api.attributes.*
 import earth.terrarium.cloche.api.target.targetName
@@ -34,6 +35,10 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 private const val GENERATE_JAVA_EXPECT_STUBS_OPTION = "generateExpectStubs"
 
+private fun commonApiStubClasspathAttributes(attributes: org.gradle.api.attributes.AttributeContainer) {
+    attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
+}
+
 private fun convertClasspath(
     compilation: TargetCompilation<*>,
     configurations: ConfigurationContainer,
@@ -51,7 +56,10 @@ private fun convertClasspath(
                 }
             }
 
-    val artifacts = getNonProjectArtifacts(configurations.named(compilation.sourceSet.compileClasspathConfigurationName)).flatMap { view ->
+    val artifacts = getNonProjectArtifacts(
+        configurations.named(compilation.sourceSet.compileClasspathConfigurationName),
+        ::commonApiStubClasspathAttributes,
+    ).flatMap { view ->
         view.artifacts.resolvedArtifacts.map { artifacts ->
             artifacts.map {
                 val artifact = objects.newInstance<GenerateStubApi.ResolvedArtifact>()
@@ -121,7 +129,10 @@ internal fun createCommonTarget(
 
             dependsOn(files(compilations.map {
                 it.map {
-                    getRelevantSyncArtifacts(it.sourceSet.compileClasspathConfigurationName)
+                    getRelevantSyncArtifacts(
+                        it.sourceSet.compileClasspathConfigurationName,
+                        ::commonApiStubClasspathAttributes,
+                    )
                 }
             }))
         }

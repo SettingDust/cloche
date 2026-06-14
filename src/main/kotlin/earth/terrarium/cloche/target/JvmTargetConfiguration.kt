@@ -6,6 +6,9 @@ import org.gradle.api.Project
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.named
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -20,8 +23,13 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
  * @param jvmVersion A provider for the JVM version (e.g., 17, 21).
  */
 internal fun Project.configureJvmTarget(sourceSet: SourceSet, jvmVersion: Provider<Int>) {
+    val javaToolchains = extensions.getByType<JavaToolchainService>()
+
     tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
         options.release.set(jvmVersion)
+        javaCompiler.set(javaToolchains.compilerFor {
+            languageVersion.set(jvmVersion.map(JavaLanguageVersion::of))
+        })
     }
 
     plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {

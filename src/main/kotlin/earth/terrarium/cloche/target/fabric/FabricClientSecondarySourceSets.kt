@@ -14,7 +14,7 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
             FabricCompilationInfo(
                 ClochePlugin.CLIENT_DATA_COMPILATION_NAME,
                 target,
-                info.intermediaryMinecraftClasspath,
+                info.transformSafeIntermediaryMinecraftClasspath,
                 info.namedMinecraftFile,
                 info.clientMinecraftFile,
                 info.finalCommonJar,
@@ -38,7 +38,7 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
             FabricCompilationInfo(
                 ClochePlugin.CLIENT_TEST_COMPILATION_NAME,
                 target,
-                info.intermediaryMinecraftClasspath,
+                info.transformSafeIntermediaryMinecraftClasspath,
                 info.commonMinecraftFile,
                 info.clientMinecraftFile,
                 info.finalCommonJar,
