@@ -1,24 +1,31 @@
 package earth.terrarium.cloche
 
-import earth.terrarium.cloche.api.MappingsBuilder
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.api.target.compilation.remapNamespace
-import earth.terrarium.cloche.target.compilation.modConfigurationName
-import earth.terrarium.cloche.target.compilation.remapSourceNamespaces
-import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
-import org.gradle.api.artifacts.ExternalModuleDependency
-import org.gradle.api.Project
-import org.gradle.api.tasks.SourceSetContainer
-import org.gradle.testkit.runner.GradleRunner
-import org.gradle.testfixtures.ProjectBuilder
-import org.junit.jupiter.api.Test
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+
+import earth.terrarium.cloche.api.MappingsBuilder
+import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
+import earth.terrarium.cloche.api.target.MinecraftTarget
+import earth.terrarium.cloche.api.target.compilation.remapNamespace
+import earth.terrarium.cloche.fixture.BuildScriptTemplate
+import earth.terrarium.cloche.fixture.LoaderKind
+import earth.terrarium.cloche.fixture.LoaderScenarioSpec
+import earth.terrarium.cloche.fixture.RepositoryPresets
+import earth.terrarium.cloche.fixture.TestKitProjectFixture
+import earth.terrarium.cloche.fixture.VerificationTaskSnippet
+import earth.terrarium.cloche.target.compilation.modConfigurationName
+import earth.terrarium.cloche.target.compilation.remapSourceNamespaces
+import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
+import org.gradle.api.Project
+import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.testkit.runner.GradleRunner
+import org.junit.jupiter.api.Test
 
 class RemapNamespaceDependencyTests {
     @Test
@@ -95,99 +102,28 @@ class RemapNamespaceDependencyTests {
 
     @Test
     fun `forge can route explicit source namespace DSL into namespace bucket without dependency attribute`() {
-        val projectDir = createTempDir("cloche-remap-namespace-routing")
-        projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"routing\"\n")
-        projectDir.resolve("build.gradle.kts").writeText(
-            """
-            plugins {
-                id("earth.terrarium.cloche")
-            }
-
-            group = "test.routing"
-            version = "1.0.0"
-
-            repositories {
-                mavenCentral()
-                maven("https://libraries.minecraft.net/")
-                maven("https://maven.fabricmc.net/")
-                maven("https://maven.neoforged.net/releases")
-                maven("https://maven.msrandom.net/repository/root/")
-                maven("https://maven.msrandom.net/repository/cloche/")
-                maven("https://maven.minecraftforge.net/")
-            }
-
-            cloche {
-                minecraftVersion = "1.20.1"
-
-                metadata {
-                    modId = "routing"
-                }
-
-                mappings {
+        val fixture = TestKitProjectFixture.create("cloche-remap-namespace-routing")
+        fixture.writeScenario(
+            spec = LoaderScenarioSpec(
+                projectName = "routing",
+                loaderKind = LoaderKind.Forge,
+                loaderVersion = "47.4.0",
+                repositories = RepositoryPresets.remapRouting,
+                mappingsBlock = """
                     official()
                     parchment("2023.09.03")
-                }
-
-                forge {
-                    loaderVersion = "47.4.0"
-
-                    dependencies {
-                        modCompileOnly("net.fabricmc:fabric-loader:0.16.10", sourceNamespace = "intermediary")
-                    }
-                }
-            }
-
-            tasks.register("verifyIntermediaryBucket") {
-                val sourceNamespaceAttribute = org.gradle.api.attributes.Attribute.of(
-                    "earth.terrarium.cloche.internal.remapSourceNamespace",
-                    String::class.java,
-                )
-                val namespaceConfigs = configurations.matching {
-                    it.name.contains("intermediary", ignoreCase = true) && it.name.endsWith("CompileClasspath")
-                }
-
-                doLast {
-                    val declarableBucket = namespaceConfigs.single { !it.isCanBeResolved }
-                    val resolvableView = namespaceConfigs.single { it.isCanBeResolved }
-
-                    check(declarableBucket.dependencies.any {
-                        it.group == "net.fabricmc" && it.name == "fabric-loader" && it.version == "0.16.10"
-                    })
-                    check(declarableBucket.dependencies.filterIsInstance<org.gradle.api.artifacts.ExternalModuleDependency>().all {
-                        it.attributes.getAttribute(earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.ATTRIBUTE) == null
-                    })
-                    check(!declarableBucket.isCanBeResolved)
-                    check(declarableBucket.isCanBeDeclared)
-                    check(!declarableBucket.isCanBeConsumed)
-                    check(resolvableView.isCanBeResolved)
-                    check(!resolvableView.isCanBeDeclared)
-                    check(!resolvableView.isCanBeConsumed)
-                    check(resolvableView.extendsFrom.contains(declarableBucket))
-                    check(resolvableView.attributes.getAttribute(earth.terrarium.cloche.REMAPPED_ATTRIBUTE) == false)
-                    check(
-                        resolvableView.attributes.getAttribute(
-                            earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.ATTRIBUTE,
-                        ) == earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL,
-                    )
-                    check(
-                        resolvableView.attributes.getAttribute(
-                            sourceNamespaceAttribute,
-                        ) == earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INTERMEDIARY,
-                    )
-                }
-            }
-            """.trimIndent()
+                """.trimIndent(),
+                dependenciesBlock = """
+                    modCompileOnly("net.fabricmc:fabric-loader:0.16.10", sourceNamespace = "intermediary")
+                """.trimIndent(),
+            ),
+            verificationTask = VerificationTaskSnippet.verifyIntermediaryBucket(),
         )
 
-        val result = GradleRunner.create()
-            .withProjectDir(projectDir)
-            .withPluginClasspath()
-            .withArguments("verifyIntermediaryBucket", "--stacktrace", "--console=plain")
-            .forwardOutput()
-            .build()
+        val result = fixture.run("verifyIntermediaryBucket", "--stacktrace", "--console=plain")
 
-assertTrue(result.output.contains("verifyIntermediaryBucket"))
-}
+        assertTrue(result.output.contains("verifyIntermediaryBucket"))
+    }
 
 @Test
 fun `forge legacy remap namespace attribute routes to same intermediary bucket but is stripped`() {
@@ -292,190 +228,146 @@ tasks.register("verifyIntermediaryBucketContracts") {
 }
 
 @Test
-fun `fabric default unannotated mod dependency is stamped as intermediary in namespace bucket`() {
-    val projectDir = createTempDir("cloche-fabric-default-namespace-routing")
-    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"fabric-routing\"\n")
-    projectDir.resolve("build.gradle.kts").writeText(
-        """
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
-import org.gradle.api.artifacts.ExternalModuleDependency
-
-plugins {
-    id("earth.terrarium.cloche")
-}
-
-group = "test.routing"
-version = "1.0.0"
-
-repositories {
-    mavenCentral()
-    maven("https://libraries.minecraft.net/")
-    maven("https://maven.fabricmc.net/")
-    maven("https://maven.msrandom.net/repository/root/")
-    maven("https://maven.msrandom.net/repository/cloche/")
-}
-
-cloche {
-    minecraftVersion = "1.20.1"
-
-    metadata {
-        modId = "fabricrouting"
-    }
-
-    mappings {
-        official()
-    }
-
-    fabric {
-        loaderVersion = "0.16.10"
-
-        dependencies {
-            modCompileOnly("net.fabricmc:fabric-loader:0.16.10")
-        }
-    }
-}
-
-tasks.register("verifyFabricDefaultIntermediaryBucket") {
-    val sourceNamespaceAttribute = org.gradle.api.attributes.Attribute.of(
-        "earth.terrarium.cloche.internal.remapSourceNamespace",
-        String::class.java,
-    )
-    val namespaceConfigs = configurations.matching {
-        it.name.contains("intermediary", ignoreCase = true) && it.name.endsWith("CompileClasspath")
-    }
-
-    doLast {
-        val declarableBucket = namespaceConfigs.single { !it.isCanBeResolved }
-        val resolvableView = namespaceConfigs.single { it.isCanBeResolved }
-        val copiedDependency = declarableBucket.dependencies
-            .filterIsInstance<ExternalModuleDependency>()
-            .single { it.group == "net.fabricmc" && it.name == "fabric-loader" && it.version == "0.16.10" }
-
-        check(copiedDependency.attributes.getAttribute(RemapNamespaceAttribute.ATTRIBUTE) == null)
-        check(resolvableView.attributes.getAttribute(earth.terrarium.cloche.REMAPPED_ATTRIBUTE) == false)
-        check(resolvableView.attributes.getAttribute(RemapNamespaceAttribute.ATTRIBUTE) == RemapNamespaceAttribute.INITIAL)
-        check(resolvableView.attributes.getAttribute(sourceNamespaceAttribute) == RemapNamespaceAttribute.INTERMEDIARY)
-    }
-}
-""".trimIndent()
+    fun `fabric default unannotated mod dependency is stamped as intermediary in namespace bucket`() {
+        val fixture = TestKitProjectFixture.create("cloche-fabric-default-namespace-routing")
+        fixture.writeScenario(
+        spec = LoaderScenarioSpec(
+            projectName = "fabric-routing",
+            modId = "fabricrouting",
+            loaderKind = LoaderKind.Fabric,
+            loaderVersion = "0.16.10",
+            repositories = RepositoryPresets.remapRouting,
+            mappingsBlock = """
+                official()
+            """.trimIndent(),
+            dependenciesBlock = """
+                modCompileOnly("net.fabricmc:fabric-loader:0.16.10")
+            """.trimIndent(),
+        ),
+        verificationTask = VerificationTaskSnippet.verifyIntermediaryBucket("verifyFabricDefaultIntermediaryBucket"),
     )
 
-    val result = GradleRunner.create()
-        .withProjectDir(projectDir)
-        .withPluginClasspath()
-        .withArguments("verifyFabricDefaultIntermediaryBucket", "--stacktrace", "--console=plain")
-        .forwardOutput()
-        .build()
+    val result = fixture.run("verifyFabricDefaultIntermediaryBucket", "--stacktrace", "--console=plain")
 
-    assertTrue(result.output.contains("verifyFabricDefaultIntermediaryBucket"))
-}
-
-@Test
-fun `fabric source set compile classpath exposes mod compile dependencies while kotlin compile stays sanitized`() {
-    val projectDir = createTempDir("cloche-fabric-compile-classpath-visibility")
-    projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"fabric-compile-classpath-visibility\"\n")
-    projectDir.resolve("build.gradle.kts").writeText(
-        """
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
-plugins {
-    id("org.jetbrains.kotlin.jvm") version "${'$'}embeddedKotlinVersion"
-    id("earth.terrarium.cloche")
-}
-
-group = "test.routing"
-version = "1.0.0"
-
-repositories {
-    mavenCentral()
-    maven("https://libraries.minecraft.net/")
-    maven("https://maven.fabricmc.net/")
-    maven("https://maven.msrandom.net/repository/root/")
-    maven("https://maven.msrandom.net/repository/cloche/")
-}
-
-cloche {
-    minecraftVersion = "1.20.1"
-
-    metadata {
-        modId = "fabric_compile_visibility"
+        assertTrue(result.output.contains("verifyFabricDefaultIntermediaryBucket"))
     }
 
-    mappings {
-        official()
+    @Test
+    fun `forge default unannotated mod dependency is stamped as searge in namespace bucket`() {
+        val fixture = TestKitProjectFixture.create("cloche-forge-default-namespace-routing")
+        fixture.writeScenario(
+            spec = LoaderScenarioSpec(
+                projectName = "forge-routing",
+                modId = "forgerouting",
+                loaderKind = LoaderKind.Forge,
+                loaderVersion = "47.4.0",
+                repositories = RepositoryPresets.remapRouting,
+                mappingsBlock = """
+                    official()
+                    parchment("2023.09.03")
+                """.trimIndent(),
+                dependenciesBlock = """
+                    modCompileOnly("net.minecraftforge:forge:1.20.1-47.4.0")
+                """.trimIndent(),
+            ),
+            verificationTask = VerificationTaskSnippet.verifySeargeBucket("verifyForgeDefaultSeargeBucket"),
+        )
+
+        val result = fixture.run("verifyForgeDefaultSeargeBucket", "--stacktrace", "--console=plain")
+
+        assertTrue(result.output.contains("verifyForgeDefaultSeargeBucket"))
     }
 
-    fabric {
-        loaderVersion = "0.16.10"
+    @Test
+    fun `fabric source set compile classpath exposes mod compile dependencies while kotlin compile stays sanitized`() {
+        val fixture = TestKitProjectFixture.create("cloche-fabric-compile-classpath-visibility")
+        fixture.writeScenario(
+            spec = LoaderScenarioSpec(
+                projectName = "fabric-compile-classpath-visibility",
+                modId = "fabric_compile_visibility",
+                buildScriptPreamble = """
+                    import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-        dependencies {
-            fabricApi("0.92.6")
-            modImplementation("net.fabricmc:fabric-language-kotlin:1.12.3+kotlin.2.0.21")
-        }
-    }
-}
+                    fun org.gradle.api.artifacts.Configuration.allDependenciesRecursive(
+                        visited: MutableSet<org.gradle.api.artifacts.Configuration> = mutableSetOf(),
+                    ): Sequence<org.gradle.api.artifacts.Dependency> {
+                        if (!visited.add(this)) return emptySequence()
+                        return dependencies.asSequence() + extendsFrom.asSequence().flatMap { it.allDependenciesRecursive(visited) }
+                    }
+                """.trimIndent(),
+                additionalPluginLines = """
+                    id("org.jetbrains.kotlin.jvm") version "${'$'}embeddedKotlinVersion"
+                """.trimIndent(),
+                loaderKind = LoaderKind.Fabric,
+                loaderVersion = "0.16.10",
+                repositories = RepositoryPresets.remapRouting.filterNot { it.contains("neoforged") || it.contains("minecraftforge") },
+                mappingsBlock = """
+                    official()
+                """.trimIndent(),
+                dependenciesBlock = """
+                    fabricApi("0.92.6")
+                    modImplementation("net.fabricmc:fabric-language-kotlin:1.12.3+kotlin.2.0.21")
+                """.trimIndent(),
+            ),
+            verificationTask = """
+                tasks.register("verifyFabricCompileClasspathVisibility") {
+                    val sourceSetName = "fabric"
+                    val compileClasspath = configurations.getByName("${'$'}sourceSetName${'$'}{"CompileClasspath"}")
+                    val modImplementation = configurations.getByName("mod${'$'}{sourceSetName.replaceFirstChar(Char::titlecase)}Implementation")
+                    val kotlinCompile = tasks.named<KotlinCompile>("compileFabricKotlin")
 
-fun org.gradle.api.artifacts.Configuration.allDependenciesRecursive(
-    visited: MutableSet<org.gradle.api.artifacts.Configuration> = mutableSetOf(),
-): Sequence<org.gradle.api.artifacts.Dependency> {
-    if (!visited.add(this)) return emptySequence()
-    return dependencies.asSequence() + extendsFrom.asSequence().flatMap { it.allDependenciesRecursive(visited) }
-}
+                    dependsOn(kotlinCompile)
 
-tasks.register("verifyFabricCompileClasspathVisibility") {
-    val sourceSetName = "fabric"
-    val compileClasspath = configurations.getByName("${'$'}sourceSetName${'$'}{"CompileClasspath"}")
-    val modImplementation = configurations.getByName("mod${'$'}{sourceSetName.replaceFirstChar(Char::titlecase)}Implementation")
-    val kotlinCompile = tasks.named<KotlinCompile>("compileFabricKotlin")
+                    doLast {
+                        check(compileClasspath.extendsFrom.contains(modImplementation)) {
+                            "${'$'}{compileClasspath.name} must extend ${'$'}{modImplementation.name}"
+                        }
 
-    dependsOn(kotlinCompile)
+                        val dependencyCoordinates = compileClasspath.allDependenciesRecursive()
+                            .mapNotNull { dependency ->
+                                val group = dependency.group ?: return@mapNotNull null
+                                val version = dependency.version ?: return@mapNotNull null
+                                "${'$'}group:${'$'}{dependency.name}:${'$'}version"
+                            }
+                            .toSet()
 
-    doLast {
-        check(compileClasspath.extendsFrom.contains(modImplementation)) {
-            "${'$'}{compileClasspath.name} must extend ${'$'}{modImplementation.name}"
-        }
+                        check("net.fabricmc:fabric-language-kotlin:1.12.3+kotlin.2.0.21" in dependencyCoordinates) {
+                            "${'$'}{compileClasspath.name} is missing fabric-language-kotlin: ${'$'}dependencyCoordinates"
+                        }
+                        check(dependencyCoordinates.any { it.startsWith("net.fabricmc.fabric-api:") }) {
+                            "${'$'}{compileClasspath.name} is missing Fabric API modules: ${'$'}dependencyCoordinates"
+                        }
 
-        val dependencyCoordinates = compileClasspath.allDependenciesRecursive()
-            .mapNotNull { dependency ->
-                val group = dependency.group ?: return@mapNotNull null
-                val version = dependency.version ?: return@mapNotNull null
-                "${'$'}group:${'$'}{dependency.name}:${'$'}version"
-            }
-            .toSet()
+                        val libraries = kotlinCompile.get().libraries.files
+                        val rawClasspathLeaks = libraries.filter { library ->
+                            val path = library.invariantSeparatorsPath
+                            path.endsWith(".jar") &&
+                                path.contains("/modules-2/files-2.1/") &&
+                                (
+                                    path.contains("/net.fabricmc.fabric-api/") ||
+                                        path.contains("/net.fabricmc/fabric-loader/") ||
+                                        path.contains("/fabric-language-kotlin/") ||
+                                        library.name.contains("intermediary", ignoreCase = true)
+                                    )
+                        }
+                        check(rawClasspathLeaks.isEmpty()) {
+                            "Kotlin compile libraries leaked raw Fabric/Fabric API/mod Kotlin or intermediary cache jars: ${'$'}rawClasspathLeaks"
+                        }
+                    }
+                }
+            """.trimIndent(),
+        )
 
-        check("net.fabricmc:fabric-language-kotlin:1.12.3+kotlin.2.0.21" in dependencyCoordinates) {
-            "${'$'}{compileClasspath.name} is missing fabric-language-kotlin: ${'$'}dependencyCoordinates"
-        }
-        check(dependencyCoordinates.any { it.startsWith("net.fabricmc.fabric-api:") }) {
-            "${'$'}{compileClasspath.name} is missing Fabric API modules: ${'$'}dependencyCoordinates"
-        }
-
-        val libraries = kotlinCompile.get().libraries.files.map { it.invariantSeparatorsPath }
-        check(libraries.none { path ->
-            path.contains("/modules-2/files-2.1/") && path.contains("/net.fabricmc.fabric-api/")
-        }) {
-            "Kotlin compile libraries leaked raw Fabric API cache jars: ${'$'}libraries"
-        }
-    }
-}
-""".trimIndent()
-    )
-
-    val result = GradleRunner.create()
-        .withProjectDir(projectDir)
-        .withPluginClasspath()
-        .withArguments(
+        val result = fixture.run(
             "verifyFabricCompileClasspathVisibility",
             "-Dorg.gradle.jvmargs=-Xmx4G -Dfile.encoding=UTF-8",
             "--max-workers=1",
             "--stacktrace",
             "--console=plain",
         )
-        .forwardOutput()
-        .build()
 
-    assertTrue(result.output.contains("verifyFabricCompileClasspathVisibility"))
-}
+        assertTrue(result.output.contains("verifyFabricCompileClasspathVisibility"))
+    }
 
 @Test
 fun `fabric kotlin compile libraries use remapped mod classpath without raw fabric api cache jars`() {
