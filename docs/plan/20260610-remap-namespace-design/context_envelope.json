@@ -1,0 +1,90 @@
+{
+  "context_envelope": {
+    "meta": {
+      "plan_id": "20260610-remap-namespace-design",
+      "created_at": "2026-06-10T00:00:00+08:00",
+      "last_updated": "2026-06-10T00:00:00+08:00",
+      "version": 3,
+      "previous_version_fields_changed": ["scope", "constraints", "architecture_snapshot", "research_digest", "prior_decisions", "plan_summary"],
+      "source": ["user cleanup feedback", "source inspection", "docs/plan/20260610-remap-namespace-design/plan.yaml", "docs/plan/20260610-remap-namespace-design/final-design.md"]
+    },
+    "scope": {
+      "purpose": ["Reusable cleanup context for completing remap namespace architecture after Waves 1-5.", "Avoid re-discovery of user feedback: no fragile reverse lookup shims; mappings provide valid namespace context."],
+      "applies_to": ["Cloche remap namespace DSL", "mapping declaration/effective namespace routing", "internal Gradle remap attributes", "remap diagnostics/report string stability", "DataDumper validation"],
+      "non_goals": ["No code implementation by planner", "No commits", "No publish/release", "No broad unrelated refactor"]
+    },
+    "project_summary": {
+      "business_domain": "Gradle plugin for Minecraft mod development across Fabric/Forge/NeoForge and Minecraft versions.",
+      "primary_users": ["Minecraft mod developers", "Cloche maintainers"],
+      "key_features": ["multi-target source sets", "mod dependency remapping", "mapping declaration orchestration", "classpath normalization", "diagnostics/reporting"],
+      "current_phase": "Post-feedback cleanup plan for completed remap namespace implementation."
+    },
+    "tech_stack": [
+      {"name": "Kotlin Gradle Plugin development", "version": "Gradle 9.x wrapper; Kotlin JVM toolchain 17", "usage_context": "Plugin implementation under src/main/kotlin.", "config_files": ["build.gradle.kts", "gradle.properties", "AGENTS.md"]},
+      {"name": "Gradle artifact transforms/configurations", "version": "Gradle API via kotlin-dsl/java-gradle-plugin", "usage_context": "Internal remap attributes, source buckets, artifact views, classpath normalization.", "config_files": ["src/main/kotlin/earth/terrarium/cloche/Attributes.kt", "src/main/kotlin/earth/terrarium/cloche/target/compilation/TargetCompilation.kt"]},
+      {"name": "JUnit Platform + Gradle TestKit", "version": "kotlin(\"test\") + gradleTestKit", "usage_context": "Regression lock tests under src/test/kotlin.", "config_files": ["build.gradle.kts"]}
+    ],
+    "conventions": ["Kotlin official style.", "Focused minimal diffs only.", "Use Gradle wrapper; on Windows use .\\gradlew.bat.", "Set JAVA_HOME to D:\\Applications\\Scoop\\apps\\intellij-jbr25-sdk-jcef\\current for Gradle/DataDumper commands.", "Reports should use explicit stable string IDs, not enum.name."],
+    "constraints": {
+      "hard": ["Remove/replace declaredSourceNamespacesByKey and declaredSourceNamespacesByDependency.", "Do not introduce equivalent dependency object/group:name/version reverse lookup shims.", "Source namespace should come from mapping declaration/effective mapping namespace context or explicit DSL override.", "User sourceNamespace must not be written to ModuleDependency.attributes.", "If transform-chain source identity remains, rename REMAP_SOURCE_NAMESPACE_ATTRIBUTE symbol/helper to artifact-source-specific internal name.", "New enum entries must use Kotlin/project style: Compile, Runtime, Run, Module, Project, File, IncludedBuild, NoArtifact, etc.", "Reports must serialize stable explicit strings, not raw enum.name.", "Final gate is DataDumper-only with --include-build D:/Projects/Minecraft/cloche.", "No commits, no publish/release."],
+      "soft": ["Keep modImplementation(notation, sourceNamespace=...) only where useful and aligned with declaration metadata.", "Prefer keeping underlying internal Gradle attribute wire name stable if renaming code symbol is sufficient.", "Avoid broad unrelated refactors."],
+      "compatibility": ["Old RemapNamespaceAttribute helper may remain only as deprecated adapter if already implemented; it must not drive new DSL or leak to copied ModuleDependency.attributes.", "Report external strings should be stable across enum renames."],
+      "security_requirements": ["Reports must avoid credentials, credentialed repository URLs, and environment secrets."]
+    },
+    "architecture_snapshot": {
+      "key_dirs": {
+        "src/main/kotlin/earth/terrarium/cloche/api": ["public API and MappingsBuilder"],
+        "src/main/kotlin/earth/terrarium/cloche/remap": ["resolved artifact identity, classpath normalizer, diagnostics/report model"],
+        "src/main/kotlin/earth/terrarium/cloche/target": ["target dependency bucket routing"],
+        "src/main/kotlin/earth/terrarium/cloche/target/compilation": ["transform/classpath/report wiring"],
+        "src/test/kotlin/earth/terrarium/cloche": ["lock tests for namespace, replacement, report behavior"],
+        "docs/plan/20260610-remap-namespace-design": ["cleanup plan and prior final design"]
+      },
+      "patterns": ["MappingsBuilder.remapNamespaces records valid mapping namespaces when mappings are declared.", "Current ClocheDependencyHandler still contains fragile declaredSourceNamespacesByDependency/ByKey maps.", "Internal attributes already split remapped, source, artifact, and consumer namespaces, but REMAP_SOURCE_NAMESPACE_ATTRIBUTE name remains confusing.", "Report serialization currently uses enum.name for classpathKind, artifact kind, fallback reason."],
+      "key_components": [
+        {"name": "ClocheDependencyHandler", "location": "src/main/kotlin/earth/terrarium/cloche/api/target/compilation/ClocheDependencyHandler.kt:23", "responsibility": ["Contains fragile source namespace reverse lookup maps to remove.", "Keeps mod*(notation, sourceNamespace) overloads."], "confidence": 0.98},
+        {"name": "MappingsBuilder", "location": "src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:63", "responsibility": ["Mapping declarations add remapNamespaces such as intermediary/searge; source namespace defaults should derive from this/effective target context."], "confidence": 0.94},
+        {"name": "TargetHandler.configureNamespaceBuckets", "location": "src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt:202", "responsibility": ["Routes dependencies to internal source buckets; currently calls dependencyHandler.declaredSourceNamespace(dependency)."], "confidence": 0.96},
+        {"name": "Attributes.kt", "location": "src/main/kotlin/earth/terrarium/cloche/Attributes.kt:17", "responsibility": ["Defines REMAP_SOURCE_NAMESPACE_ATTRIBUTE; rename code symbol/helper to artifact-source identity."], "confidence": 0.98},
+        {"name": "RemapDiagnostics", "location": "src/main/kotlin/earth/terrarium/cloche/remap/RemapDiagnostics.kt:181", "responsibility": ["Serializes replacement/classpath/artifact report fields; replace enum.name with explicit strings."], "confidence": 0.98}
+      ]
+    },
+    "research_digest": {
+      "relevant_files": [
+        {"path": "src/main/kotlin/earth/terrarium/cloche/api/target/compilation/ClocheDependencyHandler.kt", "purpose": ["Public dependency handler and explicit sourceNamespace overloads."], "why_relevant": ["Contains declaredSourceNamespacesByDependency and declaredSourceNamespacesByKey fragile shims."], "key_elements": [{"element": "declaredSourceNamespacesByDependency", "type": "variable", "location": "ClocheDependencyHandler.kt:23", "description": "Dependency object keyed source namespace registry to remove."}, {"element": "declaredSourceNamespacesByKey", "type": "variable", "location": "ClocheDependencyHandler.kt:24", "description": "group:name:version reverse lookup shim to remove."}, {"element": "modImplementation(dependencyNotation, sourceNamespace)", "type": "function", "location": "ClocheDependencyHandler.kt:52", "description": "User override API may stay if backed by declaration metadata, not dependency attributes."}], "security_sensitivity": "none", "contains_secrets": false, "reliability": "codebase", "confidence": 0.98},
+        {"path": "src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt", "purpose": ["Mapping declaration context."], "why_relevant": ["User says valid namespace information is automatically available when declaring mappings."], "key_elements": [{"element": "remapNamespaces", "type": "variable", "location": "MappingsBuilder.kt:63", "description": "ListProperty storing valid mapping namespaces; fabricIntermediary/mcpSearge add entries."}], "security_sensitivity": "none", "contains_secrets": false, "reliability": "codebase", "confidence": 0.94},
+        {"path": "src/main/kotlin/earth/terrarium/cloche/Attributes.kt", "purpose": ["Internal remap attributes."], "why_relevant": ["REMAP_SOURCE_NAMESPACE_ATTRIBUTE is semantically transform-chain artifact source identity and should be renamed if retained."], "key_elements": [{"element": "REMAP_SOURCE_NAMESPACE_ATTRIBUTE", "type": "variable", "location": "Attributes.kt:17", "description": "Current confusing internal source identity constant."}, {"element": "sourceNamespace", "type": "function", "location": "Attributes.kt:37", "description": "Helper name also conflates user source declaration with artifact source identity."}], "security_sensitivity": "none", "contains_secrets": false, "reliability": "codebase", "confidence": 0.98},
+        {"path": "src/main/kotlin/earth/terrarium/cloche/remap/ResolvedModArtifactIndex.kt", "purpose": ["Artifact/classpath/replacement enums."], "why_relevant": ["New enum entries are ALL_CAPS and should be Kotlin style with explicit string IDs."], "key_elements": [{"element": "ClocheClasspathKind", "type": "class", "location": "ResolvedModArtifactIndex.kt:8", "description": "COMPILE/RUNTIME/RUN to rename."}, {"element": "ResolvedModArtifactKind", "type": "class", "location": "ResolvedModArtifactIndex.kt:14", "description": "MODULE/PROJECT/FILE/INCLUDED_BUILD/NO_ARTIFACT etc to rename."}, {"element": "ReplacementFallbackReason", "type": "class", "location": "ResolvedModArtifactIndex.kt:58", "description": "Fallback reasons need explicit report strings."}], "security_sensitivity": "none", "contains_secrets": false, "reliability": "codebase", "confidence": 0.98},
+        {"path": "src/main/kotlin/earth/terrarium/cloche/remap/RemapDiagnostics.kt", "purpose": ["Report serialization."], "why_relevant": ["Uses enum.name for fallbackReason, classpathKind, kind."], "key_elements": [{"element": "ReplacementDecision.toReport", "type": "function", "location": "RemapDiagnostics.kt:181", "description": "fallbackReason currently reason.name."}, {"element": "ResolvedModArtifact.toReport", "type": "function", "location": "RemapDiagnostics.kt:205", "description": "classpathKind and kind currently enum.name."}, {"element": "ClasspathNormalizationResult.toReport", "type": "function", "location": "RemapDiagnostics.kt:218", "description": "kind currently enum.name."}], "security_sensitivity": "none", "contains_secrets": false, "reliability": "codebase", "confidence": 0.98}
+      ],
+      "patterns_found": [
+        {"name": "fragile dependency reverse lookup", "category": "architecture smell", "confidence": 0.99, "source": "codebase_analysis", "example_location": ["ClocheDependencyHandler.kt:23", "ClocheDependencyHandler.kt:106"]},
+        {"name": "mapping declaration namespace context", "category": "desired source of truth", "confidence": 0.94, "source": "codebase_analysis", "example_location": ["MappingsBuilder.kt:63", "MappingsBuilder.kt:149", "MappingsBuilder.kt:159"]},
+        {"name": "enum.name report leak", "category": "report compatibility", "confidence": 0.98, "source": "codebase_analysis", "example_location": ["RemapDiagnostics.kt:200", "RemapDiagnostics.kt:214", "RemapDiagnostics.kt:219"]}
+      ],
+      "dependencies": {"internal": ["ClocheDependencyHandler", "MappingsBuilder", "TargetHandler", "Attributes", "ProjectPluginApplicator", "TargetCompilation", "ResolvedModArtifactIndex", "RemapDiagnostics"], "external": ["Gradle configurations", "Gradle artifact transforms", "Gradle TestKit", "DataDumper included build"]},
+      "gotchas": [
+        {"text": "Removing the maps is insufficient if an equivalent group:name/version namespace lookup is introduced elsewhere.", "confidence": 0.98},
+        {"text": "REMAP_SOURCE_NAMESPACE_ATTRIBUTE can be renamed at Kotlin symbol/helper level while preserving the internal wire name if cache/stability risk is high.", "confidence": 0.86},
+        {"text": "Report string expectations must avoid raw enum.name before enum casing changes.", "confidence": 0.98},
+        {"text": "DataDumper remains the final gate; Cloche tests are sanity checks only for this cleanup.", "confidence": 0.95}
+      ],
+      "domain_context": {"security_considerations": [{"area": "remap reports", "location": "build/reports/cloche/remap", "concern": "Do not print credentials, credentialed repository URLs, or environment secrets."}], "testing_patterns": {"framework": "JUnit Platform + Gradle TestKit", "coverage_areas": ["namespace source derivation", "ModuleDependency.attributes absence", "internal attribute containment", "enum/report string stability", "DataDumper included-build gate"], "test_organization": "src/test/kotlin/earth/terrarium/cloche", "mock_patterns": ["ProjectBuilder", "temporary TestKit builds"]}, "error_handling": "Fail/report ambiguity in effective source namespace instead of guessing from dependency coordinates.", "data_flow": "Mappings declaration/effective context + optional DSL override -> router classification -> internal source bucket -> artifact transform/source identity -> classpath normalization -> stable diagnostics."},
+      "open_questions": [{"question": "How to choose default source namespace from mapping context when multiple namespaces are declared?", "context": "Prefer existing target/effective namespace contract; do not infer from dependency object or coordinates.", "type": "research", "affects": ["C2"]}]
+    },
+    "prior_decisions": [
+      {"decision": "Fragile declaredSourceNamespacesByKey/Dependency reverse lookup is not intended architecture and must be removed.", "rationale": ["User explicitly corrected prior implementation", "Mapping declaration/effective namespace context is available"], "evidence": ["user feedback", "ClocheDependencyHandler.kt:23", "ClocheDependencyHandler.kt:24"], "confidence": 0.99, "linked_constraints": ["no reverse lookup shims"], "linked_patterns": ["fragile dependency reverse lookup"]},
+      {"decision": "User sourceNamespace is declaration metadata, not ModuleDependency.attributes metadata.", "rationale": ["Avoid Gradle attribute role conflation", "Preserves transform/classpath attribute containment"], "evidence": ["final-design.md:9", "final-design.md:28", "user feedback"], "confidence": 0.99, "linked_constraints": ["no ModuleDependency.attributes sourceNamespace"], "linked_patterns": ["attribute containment"]},
+      {"decision": "Reports must use stable explicit strings independent of Kotlin enum entry names.", "rationale": ["Kotlin enum style can change without external report breakage", "User requested not raw enum.name"], "evidence": ["RemapDiagnostics.kt:200", "RemapDiagnostics.kt:214", "RemapDiagnostics.kt:219", "user feedback"], "confidence": 0.98, "linked_constraints": ["stable report strings"], "linked_patterns": ["enum.name report leak"]}
+    ],
+    "evidence_map": [
+      {"claim": "Fragile source namespace maps exist today.", "evidence_paths": ["src/main/kotlin/earth/terrarium/cloche/api/target/compilation/ClocheDependencyHandler.kt:23", "src/main/kotlin/earth/terrarium/cloche/api/target/compilation/ClocheDependencyHandler.kt:24"]},
+      {"claim": "Routing currently reads dependencyHandler.declaredSourceNamespace(dependency).", "evidence_paths": ["src/main/kotlin/earth/terrarium/cloche/target/TargetHandler.kt:262"]},
+      {"claim": "Mapping declarations add valid namespaces.", "evidence_paths": ["src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:63", "src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:149", "src/main/kotlin/earth/terrarium/cloche/api/MappingsBuilder.kt:159"]},
+      {"claim": "Confusing internal REMAP_SOURCE_NAMESPACE_ATTRIBUTE remains.", "evidence_paths": ["src/main/kotlin/earth/terrarium/cloche/Attributes.kt:17"]},
+      {"claim": "Reports currently use raw enum.name.", "evidence_paths": ["src/main/kotlin/earth/terrarium/cloche/remap/RemapDiagnostics.kt:200", "src/main/kotlin/earth/terrarium/cloche/remap/RemapDiagnostics.kt:214", "src/main/kotlin/earth/terrarium/cloche/remap/RemapDiagnostics.kt:219"]}
+    ],
+    "reuse_notes": {"do_not_re_read": ["Old plan wave 1-5 task details unless debugging a failing touched file", "AGENTS.md unless build/test command policy changes"], "safe_to_assume": ["Waves 1-5 implemented and DataDumper validation approved with known external failure", "No docs/PRD.yaml exists", "No commits/publish/release allowed"], "verify_before_use": ["Exact DataDumper task name before running final gate", "Exact line numbers after implementer changes", "Whether internal attribute wire name changed or only code symbol/helper changed"]},
+    "plan_summary": {"tldr": "Add lock tests, remove namespace reverse lookup shims, source defaults from mapping/effective context, rename artifact-source internal attr symbol, fix enum casing/report strings, then DataDumper gate.", "complexity": "medium", "risk_level": "medium", "key_assumptions": ["Mapping declarations expose valid namespace context", "Explicit sourceNamespace override remains declaration metadata", "DataDumper source failure is external and known"], "critical_risks": ["Equivalent reverse lookup reintroduced", "Ambiguous default namespace guessed incorrectly", "Report compatibility broken by enum rename"]}
+  }
+}
