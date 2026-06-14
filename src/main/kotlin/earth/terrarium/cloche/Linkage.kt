@@ -124,7 +124,7 @@ private fun TargetCompilation<*>.extendFromDependency(dependency: TargetCompilat
         )) {
             configurations.named(name) {
                 outgoing.variants.named(REMAPPED_VARIANT_NAME) {
-                    artifact(tasks.named(dependency.sourceSet.jarTaskName))
+                    artifact(dependency.remapJarTask!!)
                 }
             }
         }

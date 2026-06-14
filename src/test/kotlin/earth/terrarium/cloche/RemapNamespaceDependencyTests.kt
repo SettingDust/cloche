@@ -125,6 +125,62 @@ class RemapNamespaceDependencyTests {
         assertTrue(result.output.contains("verifyIntermediaryBucket"))
     }
 
+    @Test
+    fun `linked outgoing remapped variants publish dependency remap jar instead of raw jar`() {
+        val fixture = TestKitProjectFixture.create("cloche-linked-remapped-variant-artifact")
+        fixture.writeScenario(
+            spec = LoaderScenarioSpec(
+                projectName = "linked-artifact",
+                modId = "linkedartifact",
+                loaderKind = LoaderKind.Fabric,
+                loaderVersion = "0.16.10",
+                repositories = RepositoryPresets.remapRouting,
+                mappingsBlock = "official()",
+                dependenciesBlock = "",
+            ),
+            verificationTask = """
+                cloche {
+                    fabric {
+                        data()
+                    }
+                }
+
+                tasks.register("verifyLinkedRemappedVariantArtifact") {
+                    doLast {
+                        val linkedArtifactFiles = configurations
+                            .matching { it.name.endsWith("RuntimeElements") }
+                            .flatMap { it.outgoing.variants.matching { variant -> variant.name == "remapped" } }
+                            .map { it.artifacts.files.files }
+                            .filter { it.size > 1 }
+                            .flatten()
+                            .toSet()
+                        check(linkedArtifactFiles.isNotEmpty()) {
+                            "Expected at least one linked remapped variant artifact set"
+                        }
+                        val rawJar = tasks.named("jar", org.gradle.jvm.tasks.Jar::class.java)
+                            .get()
+                            .archiveFile
+                            .get()
+                            .asFile
+                        val remappedJars = tasks.matching { it.name.endsWith("RemapJar") }
+                            .flatMap { it.outputs.files.files }
+
+                        check(remappedJars.any(linkedArtifactFiles::contains)) {
+                            "Expected linked remapped variant to publish a remap jar; got ${'$'}linkedArtifactFiles"
+                        }
+                        check(rawJar !in linkedArtifactFiles) {
+                            "Linked remapped variant published raw jar ${'$'}rawJar; got ${'$'}linkedArtifactFiles"
+                        }
+                    }
+                }
+            """.trimIndent(),
+        )
+
+        val result = fixture.run("verifyLinkedRemappedVariantArtifact", "--stacktrace", "--console=plain")
+
+        assertTrue(result.output.contains("verifyLinkedRemappedVariantArtifact"))
+    }
+
 @Test
 fun `forge legacy remap namespace attribute routes to same intermediary bucket but is stripped`() {
     val projectDir = createTempDir("cloche-remap-namespace-direct-routing")

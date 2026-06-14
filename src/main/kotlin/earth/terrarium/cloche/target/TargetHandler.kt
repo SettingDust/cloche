@@ -513,7 +513,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
                         .attribute(REMAPPED_ATTRIBUTE, true)
                         .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
 
-                    artifact(tasks.named(sourceSet.jarTaskName))
+                    artifact(compilation.remapJarTask!!)
                 }
 
                 val includesStrippedVariant = outgoing.variants.create("${REMAPPED_VARIANT_NAME}IncludesStripped") {
@@ -522,7 +522,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
                         .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
                         .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, IncludeTransformationStateAttribute.Stripped)
 
-                    artifact(tasks.named(sourceSet.jarTaskName))
+                    artifact(compilation.remapJarTask!!)
                 }
 
                 components.named("java") {
