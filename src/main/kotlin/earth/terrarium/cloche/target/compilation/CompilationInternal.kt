@@ -14,7 +14,6 @@ import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.ClocheTargetInternal
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.util.optionalDir
-import earth.terrarium.cloche.util.withIdeaModel
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import org.gradle.api.Action
 import org.gradle.api.Buildable
@@ -38,29 +37,18 @@ import org.jetbrains.annotations.ApiStatus
 internal fun resolvableModConfigurationName(name: String) =
     lowerCamelCaseGradleName("mod", name)
 
-internal fun namespacedModConfigurationName(name: String, namespace: String) =
-    lowerCamelCaseGradleName("mod", namespace.lowercase().takeIf(String::isNotEmpty), "bucket", name)
-
-internal fun namespacedResolvableModConfigurationName(name: String, namespace: String) =
-    lowerCamelCaseGradleName("mod", namespace.lowercase().takeIf(String::isNotEmpty), "remapped", name)
-
 internal fun resolvableNonModConfigurationName(name: String) =
     lowerCamelCaseGradleName("nonMod", name)
 
 internal fun modConfigurationName(name: String) =
     lowerCamelCaseGradleName("mod", name)
 
-internal fun getNonProjectArtifacts(
-    configuration: Provider<out Configuration>,
-    attributeAction: AttributeContainer.() -> Unit = {},
-): Provider<ArtifactView> = configuration.map {
+internal fun getNonProjectArtifacts(configuration: Provider<out Configuration>): Provider<ArtifactView> = configuration.map {
     it.incoming.artifactView {
         componentFilter {
             // We do *not* want to build anything during sync.
             it !is ProjectComponentIdentifier
         }
-
-        attributes(attributeAction)
     }
 }
 
@@ -80,11 +68,8 @@ val SourceSet.externalApiConfigurationName
     get() = lowerCamelCaseGradleName(takeUnless(SourceSet::isMain)?.name, "externalApi")
 
 context(Project)
-internal fun getRelevantSyncArtifacts(
-    configurationName: String,
-    attributeAction: AttributeContainer.() -> Unit = {},
-): Provider<Buildable> =
-    getNonProjectArtifacts(configurations.named(configurationName), attributeAction).map(ArtifactView::getFiles)
+internal fun getRelevantSyncArtifacts(configurationName: String): Provider<Buildable> =
+    getNonProjectArtifacts(configurations.named(configurationName)).map(ArtifactView::getFiles)
 
 internal abstract class CompilationInternal : Compilation, Dependencies {
     abstract val isTest: Boolean

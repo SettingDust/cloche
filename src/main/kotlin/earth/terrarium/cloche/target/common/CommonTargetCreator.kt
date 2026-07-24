@@ -5,19 +5,16 @@ package earth.terrarium.cloche.target.common
 import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
 import earth.terrarium.cloche.JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR
 import earth.terrarium.cloche.KOTLIN_MULTIPLATFORM_STUB_PLUGIN
-import earth.terrarium.cloche.REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE
 import earth.terrarium.cloche.addClasspathDependency
 import earth.terrarium.cloche.api.attributes.*
 import earth.terrarium.cloche.api.target.targetName
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.compilation.*
-import earth.terrarium.cloche.target.configureJvmTarget
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.stubs.GenerateStubApi
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ConfigurationContainer
-import org.gradle.api.attributes.java.TargetJvmVersion
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
@@ -31,13 +28,8 @@ import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.plugin.PLUGIN_CLASSPATH_CONFIGURATION_NAME
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 private const val GENERATE_JAVA_EXPECT_STUBS_OPTION = "generateExpectStubs"
-
-private fun commonApiStubClasspathAttributes(attributes: org.gradle.api.attributes.AttributeContainer) {
-    attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-}
 
 private fun convertClasspath(
     compilation: TargetCompilation<*>,
@@ -56,10 +48,7 @@ private fun convertClasspath(
                 }
             }
 
-    val artifacts = getNonProjectArtifacts(
-        configurations.named(compilation.sourceSet.compileClasspathConfigurationName),
-        ::commonApiStubClasspathAttributes,
-    ).flatMap { view ->
+    val artifacts = getNonProjectArtifacts(configurations.named(compilation.sourceSet.compileClasspathConfigurationName)).flatMap { view ->
         view.artifacts.resolvedArtifacts.map { artifacts ->
             artifacts.map {
                 val artifact = objects.newInstance<GenerateStubApi.ResolvedArtifact>()
@@ -99,8 +88,6 @@ internal fun createCommonTarget(
         val generateStub = tasks.register<GenerateStubApi>(name) {
             group = "minecraft-stubs"
 
-            preserveMethodBodies.set(true)
-
             val jarName = compilation.capabilitySuffix.map {
                 "${commonTarget.capabilitySuffix}-$it"
             }.orElse(commonTarget.capabilitySuffix)
@@ -129,10 +116,7 @@ internal fun createCommonTarget(
 
             dependsOn(files(compilations.map {
                 it.map {
-                    getRelevantSyncArtifacts(
-                        it.sourceSet.compileClasspathConfigurationName,
-                        ::commonApiStubClasspathAttributes,
-                    )
+                    getRelevantSyncArtifacts(it.sourceSet.compileClasspathConfigurationName)
                 }
             }))
         }
@@ -156,20 +140,16 @@ internal fun createCommonTarget(
                 sourceSet,
                 commonTarget.targetName == MinecraftModLoader.common.name || commonTarget.publish
             )
-        } else {
-            createExternalDependencyConfigurations(sourceSet)
         }
 
         configureSourceSet(sourceSet, commonTarget, compilation)
 
-        if (!compilation.isTest) {
-            components.named("java") {
-                this as AdhocComponentWithVariants
+        components.named("java") {
+            this as AdhocComponentWithVariants
 
-                addVariantsFromConfiguration(configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
-                    // Common compilations are not runnable.
-                    skip()
-                }
+            addVariantsFromConfiguration(configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
+                // Common compilations are not runnable.
+                skip()
             }
         }
 
@@ -189,8 +169,6 @@ internal fun createCommonTarget(
         )
 
         compilation.attributes {
-            attributeProvider(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, commonTarget.jvmVersion)
-
             attribute(CompilationAttributes.DISTRIBUTION, variant)
             attribute(CompilationAttributes.CLOCHE_SIDE, variant.legacyName)
             attribute(CompilationAttributes.DATA, data)
@@ -242,10 +220,7 @@ internal fun createCommonTarget(
 
         tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
             options.compilerArgs.add("-A$GENERATE_JAVA_EXPECT_STUBS_OPTION")
-            options.release.set(commonTarget.jvmVersion)
         }
-
-        configureJvmTarget(sourceSet, commonTarget.jvmVersion)
 
         plugins.withId(KOTLIN_JVM_PLUGIN_ID) {
             val pluginClasspathConfigurationName = lowerCamelCaseGradleName(PLUGIN_CLASSPATH_CONFIGURATION_NAME, sourceSet.name)
@@ -259,10 +234,6 @@ internal fun createCommonTarget(
                 sourceSet.compileOnlyConfigurationName,
                 "net.msrandom:kmp-stub-annotations:1.0.0",
             )
-
-            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
-                compilerOptions.freeCompilerArgs.add("-Xexpect-actual-classes")
-            }
         }
     }
 

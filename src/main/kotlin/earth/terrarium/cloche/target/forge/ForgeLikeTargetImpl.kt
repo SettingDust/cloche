@@ -1,20 +1,14 @@
 package earth.terrarium.cloche.target.forge
 
 import earth.terrarium.cloche.ClochePlugin
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
-import earth.terrarium.cloche.api.target.ForgeLikeArtifactProvider
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
-import earth.terrarium.cloche.api.target.NamespaceArtifacts
 import earth.terrarium.cloche.api.target.NeoforgeTarget
-import earth.terrarium.cloche.target.LazyConfigurableInternal
-import earth.terrarium.cloche.target.MinecraftTargetInternal
+import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
-import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
-import earth.terrarium.cloche.util.createLoaderDependency
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
@@ -31,9 +25,6 @@ import net.peanuuutz.tomlkt.TomlTable
 import org.gradle.api.Action
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ExternalModuleDependency
-import org.gradle.api.attributes.Attribute
-import org.gradle.api.attributes.Category
-import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.attributes.Usage
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
@@ -46,17 +37,9 @@ import org.gradle.kotlin.dsl.newInstance
 import org.gradle.kotlin.dsl.register
 import javax.inject.Inject
 
-private val FORGE_LIKE_MINECRAFT_ARTIFACT_ATTRIBUTE: Attribute<String> =
-    Attribute.of("earth.terrarium.cloche.forge-like.minecraft-artifact", String::class.java)
-
-private val FORGE_LIKE_MINECRAFT_TARGET_ATTRIBUTE: Attribute<String> =
-    Attribute.of("earth.terrarium.cloche.forge-like.minecraft-target", String::class.java)
-
 @Suppress("UnstableApiUsage")
 internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     MinecraftTargetInternal(name), ForgeLikeTarget {
-    private val minecraftArtifactTargetIdentity = name
-
     internal val minecraftLibrariesConfiguration: Configuration =
         project.configurations.create(lowerCamelCaseGradleName(featureName, "minecraftLibraries")) {
             isCanBeConsumed = false
@@ -88,15 +71,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }))
     }
 
-    override val minecraftArtifacts = object : ForgeLikeArtifactProvider {
-        override val intermediaryNamespace = RemapNamespaceAttribute.SEARGE
-
-        override val searge = object : NamespaceArtifacts {
-            override val jar = resolvePatchedMinecraft.flatMap { it.output }
-            override val classpath = minecraftLibrariesConfiguration
-        }
-    }
-
     internal val generateClientExtra = project.tasks.register<GenerateForgeClientExtra>(
         lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
     ) {
@@ -106,42 +80,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         outputFile.set(output(providerFactory.provider { "client-extra" }))
         neoforge.set(this@ForgeLikeTargetImpl is NeoforgeTarget)
-    }
-
-    private fun taskOutputArtifactConfiguration(
-        classifier: String,
-        outputFile: Any,
-    ): Configuration {
-        val elements = project.configurations.create(
-            lowerCamelCaseGradleName(featureName, classifier, "minecraftArtifactElements")
-        ) {
-            isCanBeConsumed = true
-            isCanBeResolved = false
-
-            attributes.attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
-            attributes.attribute(Category.CATEGORY_ATTRIBUTE, objectFactory.named(Category.LIBRARY))
-            attributes.attribute(FORGE_LIKE_MINECRAFT_ARTIFACT_ATTRIBUTE, classifier)
-            attributes.attribute(FORGE_LIKE_MINECRAFT_TARGET_ATTRIBUTE, minecraftArtifactTargetIdentity)
-            attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objectFactory.named(LibraryElements.JAR))
-
-            outgoing.artifact(outputFile)
-        }
-
-        return project.configurations.create(
-            lowerCamelCaseGradleName(featureName, classifier, "minecraftArtifactClasspath")
-        ) {
-            isCanBeConsumed = false
-            isCanBeResolved = true
-            isTransitive = false
-
-            attributes.attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
-            attributes.attribute(Category.CATEGORY_ATTRIBUTE, objectFactory.named(Category.LIBRARY))
-            attributes.attribute(FORGE_LIKE_MINECRAFT_ARTIFACT_ATTRIBUTE, classifier)
-            attributes.attribute(FORGE_LIKE_MINECRAFT_TARGET_ATTRIBUTE, minecraftArtifactTargetIdentity)
-            attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objectFactory.named(LibraryElements.JAR))
-
-            dependencies.add(project.dependencies.project(mapOf("path" to project.path, "configuration" to elements.name)))
-        }
     }
 
     override val finalJar
@@ -171,40 +109,19 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private val patchedMinecraftArtifactClasspath = taskOutputArtifactConfiguration(
-        "patched",
-        resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output),
-    )
-
-    private val clientExtraArtifactClasspath = taskOutputArtifactConfiguration(
-        "clientExtra",
-        generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile),
-    )
-
     private val clientExtra = project.files(minecraftVersion.map {
         if (isUnobfuscatedVersion(it)) {
             emptyList()
         } else {
-            listOf(generateClientExtra)
+            listOf(generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
         }
     })
-
-    private val transformSafeMinecraftClasspath = project.files(
-        patchedMinecraftArtifactClasspath,
-        minecraftVersion.map {
-            if (isUnobfuscatedVersion(it)) {
-                emptyList<Any>()
-            } else {
-                listOf(clientExtraArtifactClasspath)
-            }
-        },
-    )
 
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
-            transformSafeMinecraftClasspath,
+            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
             minecraftFile,
             data = false,
             test = false,
@@ -217,7 +134,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 ClochePlugin.DATA_COMPILATION_NAME,
                 this,
-                transformSafeMinecraftClasspath,
+                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
                 minecraftFile,
                 data = true,
                 test = false,
@@ -237,7 +154,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 SourceSet.TEST_SOURCE_SET_NAME,
                 this,
-                transformSafeMinecraftClasspath,
+                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
                 minecraftFile,
                 data = false,
                 test = true,

@@ -1,102 +1,5 @@
 # Cloche
-
 A general-purpose Minecraft Gradle plugin for all sorts of use-cases.
-
-## Fork-specific changes
-
-This fork tracks [terrarium-earth/cloche](https://github.com/terrarium-earth/cloche) and carries several additions and fixes that improve IDE support, remapping flexibility, and target resolution.
-
-> [!IMPORTANT]
-> Fork releases and related `-dust.*` artifacts are published to:
-> `https://raw.githubusercontent.com/settingdust/maven/main/repository/`
-
-### Mixin ([cloche#65](https://github.com/terrarium-earth/cloche/pull/65))
-- Build-time mixin application for the compile classpath, providing a better IDE and debugging experience
-
-### Remapping & Mappings ([cloche#87](https://github.com/terrarium-earth/cloche/pull/87))
-- Allow specifying a remap namespace per dependency
-- Allow adding intermediary or MCP/Searge Minecraft dependencies
-- Useful for mixing Fabric and Forge/NeoForge artifacts in the same target
-
-For example, to use a Fabric mod on a Forge target:
-```kt
-cloche.forge.mappings {
-    fabricIntermediary()
-}
-
-cloche.forge.dependencies {
-    // Add Forge Minecraft with MCP/Searge mappings
-    remapClasspath(forgeMinecraft("1.20.1", "47.4.4"))
-
-    // Remap a Fabric mod from intermediary namespace
-    modImplementation("maven.modrinth:surveyor:0.6.26+1.20") {
-        attributes {
-            attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INTERMEDIARY)
-        }
-    }
-}
-```
-
-Or to use a mod mapped in MCP/Searge:
-```kt
-cloche.target.mappings {
-    mcpSearge()
-}
-
-cloche.target.dependencies {
-    remapClasspath(forgeMinecraft("1.20.1", "47.4.4"))
-
-    modImplementation(catalog.dynamictrees.mc120.forge) {
-        attributes {
-            attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.SEARGE)
-        }
-    }
-}
-```
-
-### Target Attribute ([cloche#130](https://github.com/terrarium-earth/cloche/pull/130))
-- Fix incorrectly resolving other targets with the same Minecraft version and loader
-- Add a dedicated Cloche target attribute for proper target disambiguation
-
-### Build & Compilation
-- Uses the [SettingDust/minecraft-codev](https://github.com/SettingDust/minecraft-codev) fork of codev
-- Adds JVM version targeting for common compilations ([cloche#153](https://github.com/terrarium-earth/cloche/pull/153))
-
-### jvm-multiplatform
-- Parallel stub API creation ([jvm-multiplatform#20](https://github.com/terrarium-earth/jvm-multiplatform/pull/20))
-- Method body stub support ([jvm-multiplatform#21](https://github.com/terrarium-earth/jvm-multiplatform/pull/21))
-
-### Minecraft Artifact Provider
-Each `MinecraftTarget` exposes a `minecraftArtifacts` property that provides compile-time type-safe access to resolved Minecraft JARs and classpath. The concrete type varies by target — `FabricArtifactProvider` for Fabric, `ForgeLikeArtifactProvider` for Forge/NeoForge — so only the namespaces and distributions actually supported by each loader are available.
-
-```kt
-// Fabric — intermediary namespace with common/client jars
-val fabricTarget = cloche.targets.getByName("fabric") as FabricTarget
-
-fabricTarget.minecraftArtifacts.intermediary.common   // Provider<RegularFile>
-fabricTarget.minecraftArtifacts.intermediary.client    // Provider<RegularFile>
-fabricTarget.minecraftArtifacts.intermediary.classpath // FileCollection
-
-// obf namespace also available
-fabricTarget.minecraftArtifacts.obf.common             // Provider<RegularFile>
-fabricTarget.minecraftArtifacts.obf.client             // Provider<RegularFile>
-
-// Forge / NeoForge — searge namespace with a single merged jar
-val forgeTarget = cloche.targets.getByName("forge") as ForgeTarget
-
-forgeTarget.minecraftArtifacts.searge.jar              // Provider<RegularFile>
-forgeTarget.minecraftArtifacts.searge.classpath        // FileCollection
-```
-
-Available namespaces per target type:
-
-| Target           | Provider Type               | Namespaces            | Distributions      |
-|------------------|-----------------------------|-----------------------|--------------------|
-| Fabric           | `FabricArtifactProvider`    | `obf`, `intermediary` | `common`, `client` |
-| Forge / NeoForge | `ForgeLikeArtifactProvider` | `searge`              | single merged jar  |
-
-
-## Original README
 
 Cloche functions in terms of targets, a target can have any Minecraft version or mod loader setup that you compile to, all within the same project.
 
@@ -114,19 +17,6 @@ A plethora of easily configurable features, including but not limited to:
 If you publish a library/mod API with Cloche, variants are automatically configured for consumers, thus if you use the library in common, it will automatically pick the right variants for each consuming target.
 
 ## Setup
-
-> [!IMPORTANT]
-> If you are using this fork, add the custom Maven repository below in `settings.gradle` or `settings.gradle.kts` so Gradle can resolve the plugin and its forked dependencies:
->
-> ```kt
-> pluginManagement {
->     repositories {
->         gradlePluginPortal()
->         maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/")
->     }
-> }
-> ```
-
 The basic structure for using Cloche in a `build.gradle`(`.kts`) build script is generally as follows:
 ```kt
 plugins {
@@ -139,8 +29,6 @@ version = "1.0.0"
 
 // Add the relevant repositories, depending on what targets you have
 repositories {
-  maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/") // Required for this fork and forked codev artifacts
-
   cloche.librariesMinecraft() // libraries.minecraft.net, always recommended first as Mojang sometimes publishes non-standard classifiers there which are needed on certain platforms
 
   mavenCentral() // Maven central second for best reliability

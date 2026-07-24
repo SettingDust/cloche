@@ -15,10 +15,6 @@ import earth.terrarium.cloche.target.common.CommonTargetInternal
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.util.optionalDir
-import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
-import net.msrandom.minecraftcodev.core.getVersionList
-import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
-import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
@@ -50,9 +46,6 @@ internal abstract class MinecraftTargetInternal(
     abstract override val test: LazyConfigurableInternal<TargetCompilation<*>>
 
     override val dependsOn: DomainObjectCollection<CommonTarget> =
-        project.objects.domainObjectSet(CommonTarget::class)
-
-    override val stubSources: DomainObjectCollection<CommonTarget> =
         project.objects.domainObjectSet(CommonTarget::class)
 
     open val modRemapNamespace: Provider<String>
@@ -95,21 +88,10 @@ internal abstract class MinecraftTargetInternal(
 
     override val target get() = this
 
-    val jvmVersion: Provider<Int> = target.minecraftVersion.map {
-        getVersionList(
-            getGlobalCacheDirectory(project).toPath(),
-            VERSION_MANIFEST_URL,
-            project.gradle.startParameter.isOffline
-        )
-            .version(it)
-            .javaVersion
-            .majorVersion
-    }
-
     val outputDirectory: Provider<Directory> =
         project.layout.buildDirectory.dir("minecraft").map { it.optionalDir(capabilitySuffix) }
 
-    internal val mappings = MappingsBuilder(this, project)
+    protected val mappings = MappingsBuilder(this, project)
 
     @Suppress("UNCHECKED_CAST")
     private val mappingActions =
@@ -134,10 +116,9 @@ internal abstract class MinecraftTargetInternal(
 
         project.afterEvaluate {
             if (!loaderVersion.isPresent) {
-                throw InvalidUserCodeException("loaderVersion not set for target '${this@MinecraftTargetInternal.name}'")
+                throw InvalidUserCodeException("loaderVersion not set for target '$name'")
             }
         }
-
     }
 
     private fun CommonTargetInternal.useCommonMetadata() {

@@ -33,7 +33,7 @@ private fun clientClasspath(client: Provider<Boolean>, commonJar: Provider<Regul
 internal class FabricCompilationInfo(
     name: String,
     target: FabricTargetImpl,
-    transformSafeIntermediaryMinecraftClasspath: FileCollection,
+    intermediaryMinecraftClasspath: FileCollection,
     val commonMinecraftFile: Provider<RegularFile>,
     val clientMinecraftFile: Provider<RegularFile>,
     val finalCommonJar: Provider<RegularFile>,
@@ -43,7 +43,7 @@ internal class FabricCompilationInfo(
 ) : TargetCompilationInfo<FabricTargetImpl>(
     name,
     target,
-    transformSafeIntermediaryMinecraftClasspath,
+    intermediaryMinecraftClasspath,
     client.flatMap {
         if (it) {
             clientMinecraftFile

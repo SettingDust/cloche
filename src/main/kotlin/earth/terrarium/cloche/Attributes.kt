@@ -1,56 +1,18 @@
 package earth.terrarium.cloche
 
 import earth.terrarium.cloche.api.attributes.ModDistribution
-import org.gradle.api.attributes.*
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.attributes.AttributeCompatibilityRule
+import org.gradle.api.attributes.AttributeDisambiguationRule
+import org.gradle.api.attributes.CompatibilityCheckDetails
+import org.gradle.api.attributes.MultipleCandidatesDetails
 
 /**
  * Indicates that the variant is fully remapped
  */
 @JvmField
-val REMAPPED_ATTRIBUTE: Attribute<Boolean> =
+internal val REMAPPED_ATTRIBUTE: Attribute<Boolean> =
     Attribute.of("earth.terrarium.cloche.remapped", Boolean::class.javaObjectType)
-
-/**
- * Internal transform-chain identity for the namespace a mod artifact starts in.
- *
- * This is artifact pipeline state, not user sourceNamespace declaration metadata.
- */
-@JvmField
-internal val REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE: Attribute<String> =
-    Attribute.of("earth.terrarium.cloche.internal.remapSourceNamespace", String::class.java)
-
-/**
- * Internal identity for the namespace an artifact currently contains at a specific pipeline stage.
- */
-@JvmField
-internal val REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE: Attribute<String> =
-    Attribute.of("earth.terrarium.cloche.internal.remapArtifactNamespace", String::class.java)
-
-/**
- * Internal request for the namespace a classpath consumer expects to receive.
- */
-@JvmField
-internal val REMAP_CONSUMER_NAMESPACE_ATTRIBUTE: Attribute<String> =
-    Attribute.of("earth.terrarium.cloche.internal.remapConsumerNamespace", String::class.java)
-
-internal fun AttributeContainer.remapped(value: Boolean): AttributeContainer =
-    attribute(REMAPPED_ATTRIBUTE, value)
-
-internal fun AttributeContainer.artifactSourceNamespace(namespace: String): AttributeContainer =
-    attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, namespace)
-
-internal fun AttributeContainer.artifactNamespace(namespace: String): AttributeContainer =
-    attribute(REMAP_ARTIFACT_NAMESPACE_ATTRIBUTE, namespace)
-
-internal fun AttributeContainer.consumerNamespace(namespace: String): AttributeContainer =
-    attribute(REMAP_CONSUMER_NAMESPACE_ATTRIBUTE, namespace)
-
-/**
- * Indicates that the variant has includes fully resolved/handled
- */
-@JvmField
-internal val INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE: Attribute<Boolean> =
-    Attribute.of("earth.terrarium.cloche.includeTransformedOutput", Boolean::class.javaObjectType)
 
 /**
  * Indicates that the forge mapping service has been stripped
@@ -126,65 +88,6 @@ class ClocheVersionDisambiguationRule : AttributeDisambiguationRule<String> {
         }
 
         details.closestMatch(closestVersion.versionName)
-    }
-}
-
-class RemapNamespaceCompatibilityRule : AttributeCompatibilityRule<String> {
-    override fun execute(details: CompatibilityCheckDetails<String>) {
-        if (details.producerValue == null || details.producerValue == earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL) {
-            details.compatible()
-        }
-    }
-}
-
-class RemapNamespaceDisambiguationRule : AttributeDisambiguationRule<String> {
-    override fun execute(details: MultipleCandidatesDetails<String>) {
-        val consumerValue = details.consumerValue
-
-        if (consumerValue != null && consumerValue in details.candidateValues) {
-            details.closestMatch(consumerValue)
-            return
-        }
-
-        if (earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL in details.candidateValues) {
-            details.closestMatch(earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL)
-        }
-    }
-}
-
-class InternalRemapNamespaceCompatibilityRule : AttributeCompatibilityRule<String> {
-    override fun execute(details: CompatibilityCheckDetails<String>) {
-        if (details.producerValue == null || details.producerValue == earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL) {
-            details.compatible()
-        }
-    }
-}
-
-class InternalRemapNamespaceDisambiguationRule : AttributeDisambiguationRule<String> {
-    override fun execute(details: MultipleCandidatesDetails<String>) {
-        val consumerValue = details.consumerValue
-
-        if (consumerValue != null && consumerValue in details.candidateValues) {
-            details.closestMatch(consumerValue)
-            return
-        }
-
-        if (earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL in details.candidateValues) {
-            details.closestMatch(earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute.INITIAL)
-        }
-    }
-}
-
-object ClocheTargetAttribute {
-    val ATTRIBUTE = Attribute.of("earth.terrarium.cloche.target", String::class.java)
-    const val INITIAL = "none"
-
-    class CompatibilityRule : AttributeCompatibilityRule<String> {
-        override fun execute(details: CompatibilityCheckDetails<String>) {
-            if (details.producerValue == null || details.producerValue == INITIAL || details.consumerValue == INITIAL) {
-                details.compatible()
-            }
-        }
     }
 }
 

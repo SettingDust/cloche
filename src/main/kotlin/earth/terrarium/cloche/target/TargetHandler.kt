@@ -1,10 +1,5 @@
 package earth.terrarium.cloche.target
 
-import earth.terrarium.cloche.*
-import earth.terrarium.cloche.api.attributes.CompilationAttributes
-import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
-import earth.terrarium.cloche.api.attributes.ModDistribution
-import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.WITHOUT_DATA_ATTRIBUTE
 import earth.terrarium.cloche.addClasspathDependency
@@ -17,30 +12,30 @@ import earth.terrarium.cloche.util.optionalDir
 import earth.terrarium.cloche.util.withIdeaModule
 import earth.terrarium.cloche.util.withoutDataName
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
+import net.msrandom.minecraftcodev.core.VERSION_MANIFEST_URL
 import net.msrandom.minecraftcodev.core.getVersionList
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.task.CachedMinecraftParameters
 import net.msrandom.minecraftcodev.core.utils.extension
+import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.runs.downloadAssetsTaskName
 import net.msrandom.minecraftcodev.runs.extractNativesTaskName
 import net.msrandom.minecraftcodev.runs.task.DownloadAssets
 import net.msrandom.minecraftcodev.runs.task.ExtractNatives
+import org.gradle.api.JavaVersion
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
-import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.dsl.DependencyCollector
-import org.gradle.api.attributes.Attribute
-import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.attributes.LibraryElements
-import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.kotlin.dsl.named
@@ -50,7 +45,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 internal const val MOD_ID_CATEGORY = "mod-id"
-internal const val REMAPPED_VARIANT_NAME = "remapped"
 
 fun Project.javaExecutableFor(
     version: Provider<String>,
@@ -81,223 +75,11 @@ private fun TargetCompilation<*>.addModDependencies(
 ) {
     project.configurations.dependencyScope(modConfigurationName(configurationName)) {
         addCollectedDependencies(modCollector)
-
-        attributes
-            .remapped(false)
     }
 
     project.configurations.named(configurationName) {
         addCollectedDependencies(collector)
     }
-}
-
-private val supportedRemapNamespaces = listOf(
-    RemapNamespaceAttribute.INITIAL,
-    RemapNamespaceAttribute.INTERMEDIARY,
-    RemapNamespaceAttribute.SEARGE,
-    RemapNamespaceAttribute.OBF,
-)
-
-@Suppress("DEPRECATION")
-private fun Dependency.remapNamespaceOrNull(): String? =
-    (this as? ExternalModuleDependency)
-        ?.attributes
-        ?.getAttribute(RemapNamespaceAttribute.ATTRIBUTE)
-
-private fun Project.copyDependencyToNamespaceBucket(
-    dependency: Dependency,
-    bucket: Configuration,
-) {
-    bucket.dependencies.add(dependency.copyWithoutPublicRemapNamespace(project))
-}
-
-@Suppress("UNCHECKED_CAST")
-private fun AttributeContainer.copyAttributeFrom(source: AttributeContainer, attribute: Attribute<*>) {
-    val typedAttribute = attribute as Attribute<Any>
-
-    source.getAttribute(typedAttribute)?.let { value ->
-        attribute(typedAttribute, value)
-    }
-}
-
-@Suppress("DEPRECATION")
-private fun Dependency.copyWithoutPublicRemapNamespace(project: Project): Dependency {
-    if (this !is ExternalModuleDependency || attributes.getAttribute(RemapNamespaceAttribute.ATTRIBUTE) == null) {
-        return copy()
-    }
-
-    val notation = mutableMapOf<String, String>("name" to name)
-
-    group?.let { notation["group"] = it }
-    version?.let { notation["version"] = it }
-
-    val copy = project.dependencies.create(notation) as ExternalModuleDependency
-
-    copy.isTransitive = isTransitive
-    copy.isChanging = isChanging
-
-    copy.version {
-        versionConstraint.branch?.let { branch = it }
-        if (versionConstraint.requiredVersion.isNotEmpty()) {
-            require(versionConstraint.requiredVersion)
-        }
-        if (versionConstraint.preferredVersion.isNotEmpty()) {
-            prefer(versionConstraint.preferredVersion)
-        }
-        if (versionConstraint.strictVersion.isNotEmpty()) {
-            strictly(versionConstraint.strictVersion)
-        }
-        if (versionConstraint.rejectedVersions.isNotEmpty()) {
-            reject(*versionConstraint.rejectedVersions.toTypedArray())
-        }
-    }
-
-    reason?.let(copy::because)
-
-    targetConfiguration?.let { copy.targetConfiguration = it }
-
-    attributes.keySet().forEach { attribute ->
-        if (attribute != RemapNamespaceAttribute.ATTRIBUTE) {
-            copy.attributes.copyAttributeFrom(attributes, attribute)
-        }
-    }
-
-    artifacts.forEach { artifact ->
-        copy.artifact {
-            name = artifact.name
-            type = artifact.type
-            extension = artifact.extension
-            classifier = artifact.classifier
-            url = artifact.url
-        }
-    }
-
-    requestedCapabilities.forEach { capability ->
-        copy.capabilities {
-            val version = capability.version
-
-            requireCapability(
-                if (version == null) {
-                    "${capability.group}:${capability.name}"
-                } else {
-                    "${capability.group}:${capability.name}:$version"
-                }
-            )
-        }
-    }
-
-    if (isEndorsingStrictVersions) {
-        copy.endorseStrictVersions()
-    } else {
-        copy.doNotEndorseStrictVersions()
-    }
-
-    excludeRules.forEach { rule ->
-        copy.exclude(
-            buildMap {
-                rule.group?.let { put("group", it) }
-                rule.module?.let { put("module", it) }
-            }
-        )
-    }
-
-    return copy
-}
-
-private fun Configuration.allDependenciesRecursive(visited: MutableSet<Configuration> = mutableSetOf()): Sequence<Dependency> {
-    if (!visited.add(this)) {
-        return emptySequence()
-    }
-
-    return dependencies.asSequence() + extendsFrom.asSequence().flatMap { it.allDependenciesRecursive(visited) }
-}
-
-private fun TargetCompilation<*>.configureNamespaceBuckets(
-    classpathConfigurationName: String,
-    defaultNamespace: Provider<String>,
-    explicitSourceNamespaceCollectors: Collection<DependencyCollector>,
-    extendClasspath: Configuration.() -> Unit,
-) {
-    val dependencyBuckets = linkedMapOf<String, Provider<out Configuration>>()
-
-    fun namespaceBucket(namespace: String): Provider<out Configuration> =
-        dependencyBuckets.getOrPut(namespace) {
-            val dependencyBucket = project.configurations.dependencyScope(namespacedModConfigurationName(classpathConfigurationName, namespace)) {
-                isCanBeDeclared = true
-                isCanBeResolved = false
-                isCanBeConsumed = false
-                isVisible = false
-                isTransitive = false
-
-                attributes.artifactSourceNamespace(namespace)
-                attributes.artifactNamespace(namespace)
-            }
-
-            project.configurations.resolvable(namespacedResolvableModConfigurationName(classpathConfigurationName, namespace)) {
-                isCanBeDeclared = false
-                isCanBeResolved = true
-                isCanBeConsumed = false
-                isVisible = false
-
-                shouldResolveConsistentlyWith(project.configurations.getByName(classpathConfigurationName))
-                extendsFrom(dependencyBucket.get())
-
-                attributes
-                    .remapped(false)
-                    .artifactSourceNamespace(namespace)
-                    .artifactNamespace(namespace)
-
-                @Suppress("DEPRECATION")
-                attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
-
-                attributes {
-                    resolvableAttributes(this)
-                }
-            }
-
-            dependencyBucket
-        }
-
-    val allModDependencies = project.configurations.resolvable(resolvableModConfigurationName(classpathConfigurationName)) {
-        shouldResolveConsistentlyWith(project.configurations.getByName(classpathConfigurationName))
-
-        attributes {
-            resolvableAttributes(this)
-            remapped(false)
-        }
-
-        extendClasspath()
-    }
-
-    fun routeDependencies() {
-        val fallbackNamespace = defaultNamespace.get().ifEmpty { RemapNamespaceAttribute.INITIAL }
-        val explicitDependencies = dependencyHandler.declaredModDependenciesFor(explicitSourceNamespaceCollectors)
-        val explicitDependencyObjects = explicitDependencies.mapTo(hashSetOf()) { it.dependency }
-
-        explicitDependencies.forEach { declaration ->
-            project.copyDependencyToNamespaceBucket(
-                declaration.dependency,
-                namespaceBucket(declaration.sourceNamespace).get(),
-            )
-        }
-
-        allModDependencies.get().allDependenciesRecursive().forEach { dependency ->
-            if (dependency in explicitDependencyObjects) {
-                return@forEach
-            }
-
-            val namespace = dependency.remapNamespaceOrNull() ?: fallbackNamespace
-
-            if (namespace.isNotEmpty()) {
-                project.copyDependencyToNamespaceBucket(dependency, namespaceBucket(namespace).get())
-            }
-        }
-    }
-
-    project.afterEvaluate {
-        routeDependencies()
-    }
-
 }
 
 @Suppress("UnstableApiUsage")
@@ -381,44 +163,25 @@ private fun TargetCompilation<*>.addDependencies() {
         }
     }
 
-    configureNamespaceBuckets(
-        sourceSet.compileClasspathConfigurationName,
-        target.modRemapNamespace,
-        listOf(
-            dependencyHandler.modImplementation,
-            dependencyHandler.modCompileOnly,
-            dependencyHandler.modLocalImplementation,
-            dependencyHandler.modCompileOnlyApi,
-            dependencyHandler.modApi,
-        ),
-    ) {
+    project.configurations.resolvable(resolvableModConfigurationName(sourceSet.compileClasspathConfigurationName)) {
+        isTransitive = false
+
+        shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
+
         extendModCompileClasspath()
     }
 
-    configureNamespaceBuckets(
-        sourceSet.runtimeClasspathConfigurationName,
-        target.modRemapNamespace,
-        listOf(
-            dependencyHandler.modImplementation,
-            dependencyHandler.modRuntimeOnly,
-            dependencyHandler.modLocalRuntime,
-            dependencyHandler.modLocalImplementation,
-            dependencyHandler.modApi,
-        ),
-    ) {
+    project.configurations.resolvable(resolvableModConfigurationName(sourceSet.runtimeClasspathConfigurationName)) {
+        isTransitive = false
+
+        shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
+
         extendModRuntimeClasspath()
     }
 
     project.configurations.resolvable(resolvableNonModConfigurationName(sourceSet.compileClasspathConfigurationName)) {
         shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.compileClasspathConfigurationName))
 
-        attributes {
-            resolvableAttributes(this)
-        }
-
-        extendsFrom(project.configurations.getByName(sourceSet.compileOnlyConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.compileOnlyConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.implementationConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
@@ -432,12 +195,6 @@ private fun TargetCompilation<*>.addDependencies() {
     project.configurations.resolvable(resolvableNonModConfigurationName(sourceSet.runtimeClasspathConfigurationName)) {
         shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
-        attributes {
-            resolvableAttributes(this)
-        }
-
-        extendsFrom(project.configurations.getByName(sourceSet.runtimeOnlyConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.runtimeOnlyConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.implementationConfigurationName))
 
@@ -453,35 +210,9 @@ private fun TargetCompilation<*>.addDependencies() {
         extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
 
         extendModCompileClasspath()
-        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
     }
 
     project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
-        extendModRuntimeClasspath()
-        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.localRuntimeConfigurationName))
-    }
-
-    if (!isTest) {
-        project.configurations.named(sourceSet.apiElementsConfigurationName) {
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.apiConfigurationName)))
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
-
-            extendsFrom(project.configurations.getByName(sourceSet.externalCompileConfigurationName))
-            extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
-        }
-
-        project.configurations.named(sourceSet.runtimeElementsConfigurationName) {
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.implementationConfigurationName)))
-
-            extendsFrom(project.configurations.getByName(sourceSet.externalRuntimeConfigurationName))
-            extendsFrom(project.configurations.getByName(sourceSet.externalApiConfigurationName))
-        }
-    }
-
-    project.configurations.named(remapClasspathConfiguration.name) {
-        addCollectedDependencies(dependencyHandler.remapClasspath)
         extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
         extendsFrom(project.configurations.named(sourceSet.localRuntimeConfigurationName))
 
@@ -513,8 +244,6 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
         if (!compilation.isTest) {
             createCompilationVariants(compilation, sourceSet, true)
-        } else {
-            createExternalDependencyConfigurations(sourceSet)
         }
 
         configureSourceSet(sourceSet, target, compilation)
@@ -546,7 +275,29 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             target.addJarInjects(compilation)
         }
 
-        configureJvmTarget(sourceSet, target.jvmVersion)
+        val javaVersion = target.minecraftVersion.map {
+            getVersionList(
+                getGlobalCacheDirectory(project).toPath(),
+                VERSION_MANIFEST_URL,
+                gradle.startParameter.isOffline
+            )
+                .version(it)
+                .javaVersion
+                .majorVersion
+        }
+
+        // TODO do the same for the javadoc tasks
+        tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
+            options.release.set(javaVersion)
+        }
+
+        plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
+            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
+                compilerOptions.jvmTarget.set(javaVersion.map {
+                    JvmTarget.fromTarget(JavaVersion.toVersion(it).toString())
+                })
+            }
+        }
 
         val resolvableConfigurationNames = listOf(
             sourceSet.compileClasspathConfigurationName,
@@ -569,46 +320,11 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             }
 
             configurations.named(name) {
-                val configuration = this
-
                 // TODO Can this be avoided? maybe publishing remapped Jars in a separate variant if our named namespace is stable(like mojang mappings)?
                 //  Alternatively could we find the exact artifact by checking if the files match? or via the build dependencies?
                 artifacts.clear()
 
                 project.artifacts.add(name, compilation.includeJarTask!!)
-
-                val remappedVariant = outgoing.variants.create(REMAPPED_VARIANT_NAME) {
-                    attributes
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-
-                    artifact(compilation.remapJarTask!!)
-                }
-
-                val includesStrippedVariant = outgoing.variants.create("${REMAPPED_VARIANT_NAME}IncludesStripped") {
-                    attributes
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-                        .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, IncludeTransformationStateAttribute.Stripped)
-
-                    artifact(compilation.remapJarTask!!)
-                }
-
-                components.named("java") {
-                    this as AdhocComponentWithVariants
-
-                    withVariantsFromConfiguration(configuration) {
-                        if (configurationVariant.name in listOf(remappedVariant.name, includesStrippedVariant.name)) {
-                            skip()
-                        }
-                    }
-                }
-
-                configuration.outgoing.variants.named { it == "classes" || it == "resources" }.configureEach {
-                    attributes
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-                }
             }
         }
 

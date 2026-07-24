@@ -80,17 +80,3 @@ enum class IncludeTransformationStateAttribute {
             Attribute.of("earth.terrarium.cloche.includeState", IncludeTransformationStateAttribute::class.java)
     }
 }
-
-object RemapNamespaceAttribute {
-    @JvmField
-    @Deprecated(
-        "Use modImplementation(notation, sourceNamespace = ...) or the matching mod* dependency DSL. " +
-            "This attribute is only a temporary declaration-compatibility input and is not a transform identity.",
-    )
-    val ATTRIBUTE = Attribute.of("earth.terrarium.cloche.remapNamespace", String::class.java)
-
-    const val INITIAL = "none"
-    const val OBF = "obf"
-    const val SEARGE = "srg"
-    const val INTERMEDIARY = "intermediary"
-}

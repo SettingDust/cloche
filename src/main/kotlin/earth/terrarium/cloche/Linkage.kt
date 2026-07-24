@@ -1,6 +1,5 @@
 package earth.terrarium.cloche
 
-import earth.terrarium.cloche.target.REMAPPED_VARIANT_NAME
 import earth.terrarium.cloche.target.common.commonBucketConfigurationName
 import earth.terrarium.cloche.target.compilation.*
 import net.msrandom.minecraftcodev.core.utils.extension
@@ -15,7 +14,7 @@ import org.gradle.api.tasks.SourceSet
 const val JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR = "net.msrandom:java-expect-actual-processor:1.0.9"
 const val JAVA_CLASS_EXTENSIONS_ANNOTATIONS = "net.msrandom:class-extension-annotations:1.0.0"
 const val JAVA_CLASS_EXTENSIONS_PROCESSOR = "net.msrandom:java-class-extensions-processor:1.0.1"
-const val KOTLIN_MULTIPLATFORM_STUB_PLUGIN = "net.msrandom:kmp-actual-stubs-compiler-plugin:0.1.2-dust.1"
+const val KOTLIN_MULTIPLATFORM_STUB_PLUGIN = "net.msrandom:kmp-actual-stubs-compiler-plugin:0.1.2"
 
 context(Project)
 private fun SourceSet.extendConfigurations(dependency: SourceSet, common: Boolean) {
@@ -142,10 +141,6 @@ private fun TargetCompilation<*>.extendFromDependency(dependency: TargetCompilat
             configurations.named(name(sourceSet)) {
                 dependencies.addAllLater(dependencyProvider.map(Configuration::getAllDependencies))
                 dependencyConstraints.addAllLater(dependencyProvider.map(Configuration::getAllDependencyConstraints))
-
-                outgoing.variants.named(REMAPPED_VARIANT_NAME) {
-                    artifact(dependency.remapJarTask!!)
-                }
             }
         }
     }

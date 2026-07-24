@@ -3,13 +3,13 @@ package earth.terrarium.cloche.target.forge
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.target.compilation.ForgeCompilation
-import earth.terrarium.cloche.target.addCollectedDependencies
+import earth.terrarium.cloche.util.withIdeaModule
 import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.compilation.TargetCompilationInfo
+import earth.terrarium.cloche.target.addCollectedDependencies
 import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
 import earth.terrarium.cloche.tasks.GenerateForgeModsToml
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
-import earth.terrarium.cloche.util.withIdeaModule
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
@@ -30,7 +30,7 @@ import javax.inject.Inject
 internal class ForgeCompilationInfo(
     name: String,
     target: ForgeLikeTargetImpl,
-    transformSafeIntermediaryMinecraftClasspath: FileCollection,
+    intermediaryMinecraftClasspath: FileCollection,
     namedMinecraftFile: Provider<RegularFile>,
     data: Boolean,
     test: Boolean,
@@ -38,7 +38,7 @@ internal class ForgeCompilationInfo(
 ) : TargetCompilationInfo<ForgeLikeTargetImpl>(
     name,
     target,
-    transformSafeIntermediaryMinecraftClasspath,
+    intermediaryMinecraftClasspath,
     namedMinecraftFile,
     providerFactory.provider { emptyList() },
     providerFactory.provider { ModDistribution.client },
@@ -71,14 +71,12 @@ internal abstract class ForgeCompilationImpl @Inject constructor(info: ForgeComp
     internal val writeLegacyClasspath = project.tasks.register<WriteClasspathFile>(
         lowerCamelCaseGradleName("write", target.featureName, featureName, "legacyClasspath"),
     ) {
-        classpath.from(target.minecraftLibrariesConfiguration)
         classpath.from(target.generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
         classpath.from(legacyClasspathConfiguration)
 
         if (target is ForgeTargetImpl) {
             classpath.from(finalMinecraftFile)
         }
-        classpath.from(target.generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
     }
 
     override val generateMetadataTask = project.tasks.register<GenerateForgeModsToml>(
