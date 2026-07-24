@@ -5,10 +5,17 @@ import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.attributes.RemapNamespaceAttribute
+import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.WITHOUT_DATA_ATTRIBUTE
+import earth.terrarium.cloche.addClasspathDependency
+import earth.terrarium.cloche.addDataClasspathDependency
 import earth.terrarium.cloche.target.compilation.*
 import earth.terrarium.cloche.target.fabric.FabricTargetImpl
+import earth.terrarium.cloche.util.CLASSES_AND_RESOURCES_VARIANT_NAME
+import earth.terrarium.cloche.util.configureClassesAndResourcesVariant
 import earth.terrarium.cloche.util.optionalDir
 import earth.terrarium.cloche.util.withIdeaModule
+import earth.terrarium.cloche.util.withoutDataName
 import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
 import net.msrandom.minecraftcodev.core.getVersionList
 import net.msrandom.minecraftcodev.core.operatingSystemName
@@ -26,6 +33,7 @@ import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.dsl.DependencyCollector
 import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.RegularFile
@@ -38,10 +46,11 @@ import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.register
 import org.gradle.language.jvm.tasks.ProcessResources
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 internal const val MOD_ID_CATEGORY = "mod-id"
 internal const val REMAPPED_VARIANT_NAME = "remapped"
-internal const val CLASSES_AND_RESOURCES_VARIANT_NAME = "classesAndResources"
 
 fun Project.javaExecutableFor(
     version: Provider<String>,
@@ -65,7 +74,11 @@ fun Project.javaExecutableFor(
 }
 
 @Suppress("UnstableApiUsage")
-private fun TargetCompilation<*>.addModDependencies(configurationName: String, collector: DependencyCollector, modCollector: DependencyCollector) {
+private fun TargetCompilation<*>.addModDependencies(
+    configurationName: String,
+    collector: DependencyCollector,
+    modCollector: DependencyCollector
+) {
     project.configurations.dependencyScope(modConfigurationName(configurationName)) {
         addCollectedDependencies(modCollector)
 
@@ -289,18 +302,43 @@ private fun TargetCompilation<*>.configureNamespaceBuckets(
 
 @Suppress("UnstableApiUsage")
 private fun TargetCompilation<*>.addDependencies() {
-    addModDependencies(sourceSet.implementationConfigurationName, dependencyHandler.implementation, dependencyHandler.modImplementation)
-    addModDependencies(sourceSet.runtimeOnlyConfigurationName, dependencyHandler.runtimeOnly, dependencyHandler.modRuntimeOnly)
-    addModDependencies(sourceSet.compileOnlyConfigurationName, dependencyHandler.compileOnly, dependencyHandler.modCompileOnly)
-    addModDependencies(sourceSet.localRuntimeConfigurationName, dependencyHandler.localRuntime, dependencyHandler.modLocalRuntime)
-    addModDependencies(sourceSet.localImplementationConfigurationName, dependencyHandler.localImplementation, dependencyHandler.modLocalImplementation)
+    addModDependencies(
+        sourceSet.implementationConfigurationName,
+        dependencyHandler.implementation,
+        dependencyHandler.modImplementation,
+    )
+
+    addModDependencies(
+        sourceSet.runtimeOnlyConfigurationName,
+        dependencyHandler.runtimeOnly,
+        dependencyHandler.modRuntimeOnly,
+    )
+
+    addModDependencies(
+        sourceSet.compileOnlyConfigurationName,
+        dependencyHandler.compileOnly,
+        dependencyHandler.modCompileOnly,
+    )
+
+    addModDependencies(
+        sourceSet.localRuntimeConfigurationName,
+        dependencyHandler.localRuntime,
+        dependencyHandler.modLocalRuntime,
+    )
+
+    addModDependencies(
+        sourceSet.localImplementationConfigurationName,
+        dependencyHandler.localImplementation,
+        dependencyHandler.modLocalImplementation,
+    )
 
     if (!isTest) {
         addModDependencies(
             sourceSet.compileOnlyApiConfigurationName,
             dependencyHandler.compileOnlyApi,
-            dependencyHandler.modCompileOnlyApi
+            dependencyHandler.modCompileOnlyApi,
         )
+
         addModDependencies(sourceSet.apiConfigurationName, dependencyHandler.api, dependencyHandler.modApi)
     }
 
@@ -321,25 +359,25 @@ private fun TargetCompilation<*>.addDependencies() {
     }
 
     fun Configuration.extendModCompileClasspath() {
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.compileOnlyConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.implementationConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.localImplementationConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.compileOnlyConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.implementationConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.localImplementationConfigurationName)))
 
         if (!isTest) {
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.apiConfigurationName)))
+            extendsFrom(project.configurations.named(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
+            extendsFrom(project.configurations.named(modConfigurationName(sourceSet.apiConfigurationName)))
         }
     }
 
     fun Configuration.extendModRuntimeClasspath() {
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.implementationConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.implementationConfigurationName)))
 
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.localRuntimeConfigurationName)))
-        extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.localImplementationConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.localRuntimeConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.localImplementationConfigurationName)))
 
         if (!isTest) {
-            extendsFrom(project.configurations.getByName(modConfigurationName(sourceSet.apiConfigurationName)))
+            extendsFrom(project.configurations.named(modConfigurationName(sourceSet.apiConfigurationName)))
         }
     }
 
@@ -381,10 +419,13 @@ private fun TargetCompilation<*>.addDependencies() {
         extendsFrom(project.configurations.getByName(sourceSet.compileOnlyConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.compileOnlyConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.implementationConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
 
         if (!isTest) {
-            extendsFrom(project.configurations.getByName(sourceSet.compileOnlyApiConfigurationName))
-            extendsFrom(project.configurations.getByName(sourceSet.apiConfigurationName))
+            extendsFrom(project.configurations.named(sourceSet.compileOnlyApiConfigurationName))
+            extendsFrom(project.configurations.named(sourceSet.apiConfigurationName))
         }
     }
 
@@ -397,16 +438,20 @@ private fun TargetCompilation<*>.addDependencies() {
 
         extendsFrom(project.configurations.getByName(sourceSet.runtimeOnlyConfigurationName))
         extendsFrom(project.configurations.getByName(sourceSet.implementationConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.runtimeOnlyConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.implementationConfigurationName))
 
-        extendsFrom(project.configurations.getByName(sourceSet.localRuntimeConfigurationName))
-        extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.localRuntimeConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
 
         if (!isTest) {
-            extendsFrom(project.configurations.getByName(sourceSet.apiConfigurationName))
+            extendsFrom(project.configurations.named(sourceSet.apiConfigurationName))
         }
     }
 
     project.configurations.named(sourceSet.compileClasspathConfigurationName) {
+        extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
+
         extendModCompileClasspath()
         extendsFrom(project.configurations.getByName(sourceSet.localImplementationConfigurationName))
     }
@@ -437,6 +482,27 @@ private fun TargetCompilation<*>.addDependencies() {
 
     project.configurations.named(remapClasspathConfiguration.name) {
         addCollectedDependencies(dependencyHandler.remapClasspath)
+        extendsFrom(project.configurations.named(sourceSet.localImplementationConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.localRuntimeConfigurationName))
+
+        extendModRuntimeClasspath()
+    }
+
+    project.configurations.named(sourceSet.apiElementsConfigurationName) {
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.apiConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
+
+        extendsFrom(project.configurations.named(sourceSet.externalCompileConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.externalApiConfigurationName))
+    }
+
+    project.configurations.named(sourceSet.runtimeElementsConfigurationName) {
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.apiConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.implementationConfigurationName)))
+        extendsFrom(project.configurations.named(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)))
+
+        extendsFrom(project.configurations.named(sourceSet.externalRuntimeConfigurationName))
+        extendsFrom(project.configurations.named(sourceSet.externalApiConfigurationName))
     }
 }
 
@@ -455,12 +521,15 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
         compilation.addDependencies()
 
+        sourceSet.output.dir(mapOf("builtBy" to compilation.generateMetadataTask), compilation.metadataDirectory)
+
         val copyMixins = tasks.register<Copy>(
             lowerCamelCaseGradleName("copy", target.featureName, compilation.featureName, "mixins"),
         ) {
             from(compilation.mixins)
 
-            destinationDir = layout.buildDirectory.dir("mixins").get().optionalDir(target.namePath).dir(compilation.namePath).asFile
+            destinationDir =
+                layout.buildDirectory.dir("mixins").get().optionalDir(target.namePath).dir(compilation.namePath).asFile
         }
 
         project.tasks.named<ProcessResources>(sourceSet.processResourcesTaskName) {
@@ -544,36 +613,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         }
 
         if (!compilation.isTest) {
-            configurations.named(sourceSet.runtimeElementsConfigurationName) {
-                val configuration = this
-
-                val classesAndResourcesVariants = outgoing.variants.named { it == "classes" || it == "resources" }
-
-                val classesAndResourcesVariant = outgoing.variants.maybeCreate(
-                    CLASSES_AND_RESOURCES_VARIANT_NAME
-                ).also {
-                    it.attributes
-                        .attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.CLASSES_AND_RESOURCES))
-                        .attribute(REMAPPED_ATTRIBUTE, true)
-                        .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
-
-                    classesAndResourcesVariants.configureEach {
-                        artifacts.configureEach {
-                            it.artifact(this)
-                        }
-                    }
-                }
-
-                components.named("java") {
-                    this as AdhocComponentWithVariants
-
-                    withVariantsFromConfiguration(configuration) {
-                        if (configurationVariant.name == classesAndResourcesVariant.name) {
-                            skip()
-                        }
-                    }
-                }
-            }
+            configureClassesAndResourcesVariant(sourceSet)
         }
 
         for (name in resolvableConfigurationNames) {
@@ -591,6 +631,18 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             configurations.findByName(name)?.attributes(compilation::consumableAttributes)
         }
 
+        configurations.named(sourceSet.compileClasspathConfigurationName) {
+            attributes {
+                attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, named(LibraryElements.CLASSES))
+            }
+        }
+
+        configurations.named(sourceSet.runtimeClasspathConfigurationName) {
+            attributes {
+                attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, named(LibraryElements.CLASSES_AND_RESOURCES))
+            }
+        }
+
         if (testName != null) {
             val sourceSetName = sourceSetName(target, testName)
 
@@ -604,7 +656,66 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         }
     }
 
+    fun configureMainForData(main: TargetCompilation<*>) {
+        val runtimeElements = configurations.named(main.sourceSet.runtimeElementsConfigurationName)
+
+        main.sourceSet.output.dir(mapOf("builtBy" to target.datagenDirectoryBuildDependencies), target.datagenDirectory)
+
+        configurations.named(target.main.sourceSet.runtimeElementsConfigurationName) {
+            outgoing {
+                variants {
+                    val resourcesWithoutDataVariantName = withoutDataName(LibraryElements.RESOURCES)
+
+                    named(LibraryElements.RESOURCES) {
+                        artifact(main.metadataDirectory) {
+                            type = ArtifactTypeDefinition.JVM_RESOURCES_DIRECTORY
+
+                            builtBy(main.generateMetadataTask)
+                        }
+
+                        artifact(target.datagenDirectory) {
+                            type = ArtifactTypeDefinition.JVM_RESOURCES_DIRECTORY
+
+                            builtBy(target.datagenDirectoryBuildDependencies)
+                        }
+
+                        target.onClientIncluded {
+                            artifact(target.datagenClientDirectory) {
+                                type = ArtifactTypeDefinition.JVM_RESOURCES_DIRECTORY
+
+                                builtBy(target.datagenClientDirectoryBuildDependencies)
+                            }
+                        }
+                    }
+
+                    register(resourcesWithoutDataVariantName) {
+                        val resources = runtimeElements.flatMap {
+                            it.outgoing.variants.named(LibraryElements.RESOURCES)
+                        }
+
+                        attributes {
+                            attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, named(LibraryElements.RESOURCES))
+                            attribute(WITHOUT_DATA_ATTRIBUTE, true)
+                        }
+
+                        artifacts.addAllLater(resources.map {
+                            it.artifacts.matching { !main.generatedResourceOutputs.contains(it.file) }
+                        })
+                    }
+
+                    configureClassesAndResourcesVariant(
+                        withoutDataName(CLASSES_AND_RESOURCES_VARIANT_NAME),
+                        this@named,
+                        resourcesWithoutDataVariantName,
+                        withoutData = true,
+                    )
+                }
+            }
+        }
+    }
+
     addCompilation(target.main, SourceSet.TEST_SOURCE_SET_NAME)
+    configureMainForData(target.main)
 
     target.data.onConfigured {
         addCompilation(it)
@@ -614,12 +725,32 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
     target.test.onConfigured {
         addCompilation(it)
         it.addClasspathDependency(target.main)
+
+        it.sourceSet.output.dir(mapOf("builtBy" to target.datagenDirectoryBuildDependencies), target.datagenDirectory)
     }
 
     if (target is FabricTargetImpl) {
         target.client.onConfigured { client ->
-            addCompilation(client, ClochePlugin.Companion.CLIENT_TEST_COMPILATION_NAME)
+            addCompilation(client, ClochePlugin.CLIENT_TEST_COMPILATION_NAME)
             client.addClasspathDependency(target.main)
+
+            configureMainForData(client)
+
+            client.sourceSet.output.dir(mapOf("builtBy" to target.datagenClientDirectoryBuildDependencies), target.datagenDirectory)
+
+            configurations.named(target.main.sourceSet.runtimeElementsConfigurationName) {
+                outgoing {
+                    variants {
+                        named(LibraryElements.RESOURCES) {
+                            artifact(target.datagenClientDirectory) {
+                                type = ArtifactTypeDefinition.JVM_RESOURCES_DIRECTORY
+
+                                builtBy(target.datagenClientDirectoryBuildDependencies)
+                            }
+                        }
+                    }
+                }
+            }
 
             client.data.onConfigured { data ->
                 addCompilation(data)
@@ -639,6 +770,9 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
                 target.test.onConfigured {
                     test.addClasspathDependency(it)
                 }
+
+                test.sourceSet.output.dir(mapOf("builtBy" to target.datagenDirectoryBuildDependencies), target.datagenDirectory)
+                test.sourceSet.output.dir(mapOf("builtBy" to target.datagenClientDirectoryBuildDependencies), target.datagenDirectory)
             }
         }
     }
@@ -649,29 +783,6 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
     tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName) {
         minecraftVersion.set(target.minecraftVersion)
-    }
-
-    configurations.named(target.sourceSet.runtimeElementsConfigurationName) {
-        val configuration = this
-
-        val variant = outgoing.variants.create("includeTransformed") {
-            attributes
-                .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, true)
-                .attribute(CompilationAttributes.DISTRIBUTION, ModDistribution.client)
-                .attribute(CompilationAttributes.CLOCHE_SIDE, ModDistribution.client.legacyName)
-
-            artifact(target.finalJar)
-        }
-
-        components.named("java") {
-            this as AdhocComponentWithVariants
-
-            withVariantsFromConfiguration(configuration) {
-                if (configurationVariant.name == variant.name) {
-                    skip()
-                }
-            }
-        }
     }
 
     artifacts.add(Dependency.ARCHIVES_CONFIGURATION, target.finalJar)

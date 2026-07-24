@@ -235,7 +235,7 @@ internal fun Project.configureSourceSet(
         }
     }
 
-    if (compilation is TargetCompilation<*>) {
+/*    if (compilation is TargetCompilation<*>) {
         withIdeaModel {
             syncTask.configure {
                 if (it.module.isDownloadSources) {
@@ -243,7 +243,7 @@ internal fun Project.configureSourceSet(
                 }
             }
         }
-    }
+    }*/
 
     if (compilation.isTest) {
         return

@@ -2,6 +2,8 @@ package earth.terrarium.cloche.target.compilation
 
 import earth.terrarium.cloche.*
 import earth.terrarium.cloche.ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID
+import earth.terrarium.cloche.MOD_CLASSPATH_PREFERABLE_ATTRIBUTE
+import earth.terrarium.cloche.REMAPPED_ATTRIBUTE
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
@@ -39,6 +41,7 @@ import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import net.msrandom.minecraftcodev.remapper.task.RemapJar
 import org.gradle.api.NamedDomainObjectProvider
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.DependencyScopeConfiguration
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
@@ -48,6 +51,10 @@ import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.attributes.AttributeContainer
 import org.gradle.api.attributes.*
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
+import org.gradle.api.attributes.Usage
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.Directory
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFile
@@ -463,10 +470,10 @@ data class FinalJarTasks(
     val decompileTask: TaskProvider<Decompile>,
     val mixinTask: TaskProvider<Mixin>
 ) {
-    val libraryArtifact
+    val libraryArtifact: Provider<RegularFile>
         get() = accessWidenTask.flatMap(AccessWiden::outputFile)
 
-    val sourcesArtifact
+    val sourcesArtifact: Provider<RegularFile>
         get() = decompileTask.flatMap(Decompile::outputFile)
 }
 
@@ -739,7 +746,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     final override val sourceSet: SourceSet = project.compilationSourceSet(_info.target, _info.name)
 
-    val modOutputs = project.files(sourceSet.output)
+    val modOutputs: ConfigurableFileCollection = project.files(sourceSet.output)
 
     internal val sourceNamespaces: Provider<Set<String>> = target.modRemapNamespace.map(::remapSourceNamespaces)
 
@@ -759,9 +766,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         get() = project.layout.buildDirectory.dir("generated")
             .map { it.dir("metadata").optionalDir(target.featureName).dir(namePath) }
 
-    val finalMinecraftFile
-        get() =
-            setupFiles.libraryArtifact
+    abstract val generateMetadataTask: TaskProvider<out Task>
+
+    val finalMinecraftFile get() = setupFiles.libraryArtifact
 
     val sources
         get() =
@@ -786,12 +793,14 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 "includeFiles",
             )
         ) {
-            extendsFrom(includeBucketConfiguration.get())
+            extendsFrom(includeBucketConfiguration)
 
             this@TargetCompilation.attributes(attributes)
 
             attributes
-                .attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, true)
+                .attribute(Category.CATEGORY_ATTRIBUTE, objectFactory.named(Category.LIBRARY))
+                .attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
+                .attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objectFactory.named(LibraryElements.JAR))
                 .attributeProvider(CompilationAttributes.DISTRIBUTION, _info.side)
                 .attributeProvider(CompilationAttributes.CLOCHE_SIDE, _info.side.map(ModDistribution::legacyName))
                 .attribute(CompilationAttributes.DATA, _info.data)
@@ -863,6 +872,9 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         null
     }
 
+    val generatedResourceOutputs: ConfigurableFileCollection =
+        project.files(target.datagenDirectory, target.datagenClientDirectory, metadataDirectory)
+
     init {
         setupModTransformationPipeline(project, _info.target, this)
         registerRemapReportTask()
@@ -872,6 +884,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 REMAPPED_ATTRIBUTE,
                 _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            attributes.attribute(MOD_CLASSPATH_PREFERABLE_ATTRIBUTE, true)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
             attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)
@@ -884,6 +897,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
                 REMAPPED_ATTRIBUTE,
                 _info.target.minecraftVersion.map { !isUnobfuscatedVersion(it) })
             attributes.attribute(INCLUDE_TRANSFORMED_OUTPUT_ATTRIBUTE, false)
+            attributes.attribute(MOD_CLASSPATH_PREFERABLE_ATTRIBUTE, true)
             attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
             attributes.attribute(RemapNamespaceAttribute.ATTRIBUTE, MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE)
             attributes.attribute(REMAP_ARTIFACT_SOURCE_NAMESPACE_ATTRIBUTE, RemapNamespaceAttribute.INITIAL)

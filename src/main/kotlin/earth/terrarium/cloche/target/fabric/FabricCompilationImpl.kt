@@ -67,19 +67,7 @@ internal class FabricCompilationInfo(
 
 internal abstract class FabricCompilationImpl @Inject constructor(override val info: FabricCompilationInfo) :
     TargetCompilation<FabricTargetImpl>(info), FabricCompilation {
-    val commonMinecraftFile get() =
-        info.finalCommonJar
-
-    val clientMinecraftFile get() =
-        info.client.flatMap {
-            if (it) {
-                setupFiles.libraryArtifact
-            } else {
-                null
-            }
-        }
-
-    internal val generateModJson = project.tasks.register<GenerateFabricModJson>(
+    override val generateMetadataTask = project.tasks.register<GenerateFabricModJson>(
         lowerCamelCaseGradleName("generate", target.featureName, featureName, "modJson"),
     ) {
         loaderDependencyVersion.set(target.loaderVersion.map {
@@ -97,19 +85,13 @@ internal abstract class FabricCompilationImpl @Inject constructor(override val i
 
     init {
         if (!info.name.startsWith(ClochePlugin.CLIENT_COMPILATION_NAME)) {
-            project.tasks.named<ProcessResources>(sourceSet.processResourcesTaskName) {
-                from(metadataDirectory)
-
-                dependsOn(generateModJson)
-            }
-
             project.withIdeaModule(sourceSet) {
                 it.resourceDirs.add(metadataDirectory.get().asFile)
             }
         }
     }
 
-    override fun withMetadataJson(action: Action<MetadataFileProvider<JsonObject>>) = generateModJson.configure {
+    override fun withMetadataJson(action: Action<MetadataFileProvider<JsonObject>>) = generateMetadataTask.configure {
         withJson(action)
     }
 }

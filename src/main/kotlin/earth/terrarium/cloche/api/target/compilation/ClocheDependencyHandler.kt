@@ -112,7 +112,7 @@ abstract class ClocheDependencyHandler @Inject constructor(
     val stripIncludes: StripIncludesDependencyModifier = project.objects.newInstance<StripIncludesDependencyModifier>()
 
     fun fabricApi(apiVersion: String) {
-        modImplementation.add(minecraftVersion.map {
+        modApi.add(minecraftVersion.map {
             fabricApiDependency(apiVersion, it)
         })
     }
@@ -122,17 +122,17 @@ abstract class ClocheDependencyHandler @Inject constructor(
     }
 
     fun fabricApi(apiVersion: String, minecraftVersion: String) {
-        modImplementation.add(fabricApiDependency(apiVersion, minecraftVersion))
+        modApi.add(fabricApiDependency(apiVersion, minecraftVersion))
     }
 
     fun fabricApi(apiVersion: Provider<String>, minecraftVersion: String) {
-        modImplementation.add(apiVersion.map {
+        modApi.add(apiVersion.map {
             fabricApiDependency(it, minecraftVersion)
         })
     }
 
     fun fabricApi(apiVersion: String, minecraftVersion: Provider<String>) {
-        modImplementation.add(minecraftVersion.orElse(this.minecraftVersion).map {
+        modApi.add(minecraftVersion.orElse(this.minecraftVersion).map {
             fabricApiDependency(apiVersion, it)
         })
     }
@@ -142,7 +142,7 @@ abstract class ClocheDependencyHandler @Inject constructor(
     }
 
     private fun addLazyFabricApi(apiVersion: Provider<String>, minecraftVersion: Provider<String>) {
-        modImplementation.add(
+        modApi.add(
             apiVersion.zip(minecraftVersion, ::Pair)
                 .map { (apiVersion, minecraftVersion) ->
                     fabricApiDependency(apiVersion, minecraftVersion)

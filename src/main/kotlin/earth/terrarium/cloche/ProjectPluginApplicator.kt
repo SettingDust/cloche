@@ -3,6 +3,11 @@ package earth.terrarium.cloche
 import earth.terrarium.cloche.ClochePlugin.Companion.IDE_SYNC_TASK_NAME
 import earth.terrarium.cloche.ClochePlugin.Companion.WRITE_MOD_ID_TASK_NAME
 import earth.terrarium.cloche.api.attributes.*
+import earth.terrarium.cloche.api.attributes.ClocheAttributes
+import earth.terrarium.cloche.api.attributes.CommonTargetAttributes
+import earth.terrarium.cloche.api.attributes.CompilationAttributes
+import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.attributes.TargetAttributes
 import earth.terrarium.cloche.target.MOD_ID_CATEGORY
 import earth.terrarium.cloche.target.applyTargets
 import earth.terrarium.cloche.tasks.WriteModId
@@ -30,6 +35,14 @@ import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.kotlin.dsl.*
+import org.gradle.kotlin.dsl.add
+import org.gradle.kotlin.dsl.apply
+import org.gradle.kotlin.dsl.artifacts
+import org.gradle.kotlin.dsl.create
+import org.gradle.kotlin.dsl.withType
+import org.gradle.kotlin.dsl.named
+import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.withModule
 import org.gradle.plugins.ide.idea.IdeaPlugin
 
 private fun propertyName(name: String) = "earth.terrarium.cloche.$name"
@@ -101,6 +114,15 @@ fun applyToProject(target: Project) {
             compatibilityRules.add(ClocheTargetAttribute.CompatibilityRule::class)
         }
 
+        attribute(ClocheAttributes.CLOCHE_VERSION) {
+            compatibilityRules.add(ClocheVersionCompatibilityRule::class)
+            disambiguationRules.add(ClocheVersionDisambiguationRule::class)
+        }
+
+        attribute(WITHOUT_DATA_ATTRIBUTE) {
+            disambiguationRules.add(WithoutDataDisambiguationRule::class)
+        }
+
         attribute(TargetAttributes.MOD_LOADER)
         attribute(TargetAttributes.CLOCHE_MOD_LOADER)
         attribute(TargetAttributes.MINECRAFT_VERSION)
@@ -152,10 +174,14 @@ fun applyToProject(target: Project) {
         outputFile.set(target.layout.buildDirectory.file("modId.txt"))
     }
 
-    target.configurations.consumable("modId") {
+    val modIdVariant = target.configurations.consumable("modId") {
         attributes.attribute(Category.CATEGORY_ATTRIBUTE, target.objects.named(MOD_ID_CATEGORY))
+    }
 
-        outgoing.artifact(writeModId.flatMap(WriteModId::outputFile))
+    target.artifacts {
+        add(modIdVariant.name, writeModId.flatMap(WriteModId::outputFile)) {
+            builtBy(writeModId)
+        }
     }
 
     target.tasks.register(IDE_SYNC_TASK_NAME) {
@@ -170,6 +196,14 @@ fun applyToProject(target: Project) {
     target.ideSyncHook()
 
     target.dependencies.components.withModule<ForgeLexToNeoComponentMetadataRule>("net.minecraftforge:forge") {
+        params(
+            getGlobalCacheDirectory(target),
+            VERSION_MANIFEST_URL,
+            target.gradle.startParameter.isOffline,
+        )
+    }
+
+    target.dependencies.components.withModule<ForgeLexToNeoComponentMetadataRule>("net.neoforged:forge") {
         params(
             getGlobalCacheDirectory(target),
             VERSION_MANIFEST_URL,

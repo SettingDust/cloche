@@ -323,18 +323,6 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         separator.set(File.pathSeparator)
     }
 
-    val writeCommonGameLibrariesTask: TaskProvider<WriteClasspathFile> = project.tasks.register<WriteClasspathFile>(
-        lowerCamelCaseGradleName("write", featureName, "commonGameLibraries"),
-    ) {
-        classpath.from(commonLibrariesConfiguration)
-    }
-
-    val writeClientGameLibrariesTask: TaskProvider<WriteClasspathFile> = project.tasks.register<WriteClasspathFile>(
-        lowerCamelCaseGradleName("write", featureName, "clientGameLibraries"),
-    ) {
-        classpath.from(clientLibrariesConfiguration)
-    }
-
     private val commonJar = minecraftRemapNamespace.flatMap {
         if (it.isEmpty()) {
             resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
@@ -406,7 +394,19 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             extendsFrom(clientLibrariesConfiguration)
         }
 
-        main.generateModJson.configure {
+        client.data.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(clientLibrariesConfiguration)
+            }
+        }
+
+        client.test.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(clientLibrariesConfiguration)
+            }
+        }
+
+        main.generateMetadataTask.configure {
             clientMixinConfigs.from(client.mixins)
         }
 
@@ -423,6 +423,18 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
         project.configurations.named(sourceSet.localImplementationConfigurationName) {
             extendsFrom(clientLibrariesConfiguration)
+        }
+
+        data.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(clientLibrariesConfiguration)
+            }
+        }
+
+        test.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(clientLibrariesConfiguration)
+            }
         }
 
         project.objects.newInstance<FabricIncludedClient>()
@@ -491,10 +503,24 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
         main = registerCommonCompilation(SourceSet.MAIN_SOURCE_SET_NAME)
 
+        project.dependencies.add(sourceSet.runtimeOnlyConfigurationName, project.files(generateMappingsArtifact.flatMap(Zip::getArchiveFile)))
+
         commonLibrariesConfiguration.shouldResolveConsistentlyWith(project.configurations.getByName(sourceSet.runtimeClasspathConfigurationName))
 
         project.configurations.named(sourceSet.localImplementationConfigurationName) {
             extendsFrom(commonLibrariesConfiguration)
+        }
+
+        data.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(commonLibrariesConfiguration)
+            }
+        }
+
+        test.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(commonLibrariesConfiguration)
+            }
         }
 
         mappings.fabricIntermediary()
@@ -521,7 +547,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
 
         main.dependencies {
-            implementation.add(fabricLoader)
+            api.add(fabricLoader)
         }
     }
 

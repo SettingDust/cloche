@@ -35,6 +35,7 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.Category
 import org.gradle.api.attributes.LibraryElements
 import org.gradle.api.attributes.Usage
+import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.SourceSet
@@ -225,7 +226,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         data.dependencies {
-            runtimeOnly.add(clientExtra)
+            implementation.add(clientExtra)
         }
 
         data
@@ -245,7 +246,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         )
 
         test.dependencies {
-            runtimeOnly.add(clientExtra)
+            implementation.add(clientExtra)
         }
 
         test
@@ -258,9 +259,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         providerFactory.provider { false }
 
     override val runs = objectFactory.newInstance<ForgeRunConfigurations<out ForgeLikeTargetImpl>>(this)
-
-    abstract val group: String
-    abstract val artifact: String
 
     override val metadata = objectFactory.newInstance<ForgeMetadata>(this)
     override val legacyClasspath = main.legacyClasspath
@@ -282,7 +280,19 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             extendsFrom(minecraftLibrariesConfiguration)
         }
 
-        main.dependencyHandler.runtimeOnly(clientExtra)
+        data.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(minecraftLibrariesConfiguration)
+            }
+        }
+
+        test.onConfigured {
+            project.configurations.named(it.sourceSet.localImplementationConfigurationName) {
+                extendsFrom(minecraftLibrariesConfiguration)
+            }
+        }
+
+        main.dependencyHandler.implementation(clientExtra)
 
         val userdev = forgeDependency {
             capabilities {
@@ -313,19 +323,16 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             start.set(version)
         }
 
-    protected fun forgeDependency(
-        group: String = this.group,
-        artifact: String = this.artifact,
-        configure: ExternalModuleDependency.() -> Unit
-    ): Provider<ExternalModuleDependency> =
-        minecraftVersion.flatMap { minecraftVersion ->
-            loaderVersion.map { forgeVersion ->
-                dependencyFactory.createLoaderDependency(
-                    group,
-                    artifact,
-                    version(minecraftVersion, forgeVersion),
-                    configure
-                )
+    protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
+        minecraftVersion.zip(loaderVersion, ::Pair).flatMap { (minecraftVersion, forgeVersion) ->
+            group.zip(artifact) { group, artifact ->
+                dependencyFactory.create(group, artifact, null).apply {
+                    version {
+                        strictly(version(minecraftVersion, forgeVersion))
+                    }
+
+                    configure()
+                }
             }
         }
 

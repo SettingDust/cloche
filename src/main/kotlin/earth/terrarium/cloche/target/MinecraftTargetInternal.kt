@@ -29,6 +29,7 @@ import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.dsl.Dependencies
 import org.gradle.api.artifacts.dsl.DependencyCollector
 import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Internal
@@ -68,6 +69,25 @@ internal abstract class MinecraftTargetInternal(
 
             javaExecutable.set(project.javaExecutableFor(minecraftVersion, cacheParameters))
         }
+
+    val mappingsBuildDependenciesHolder: Configuration by lazy(LazyThreadSafetyMode.NONE) {
+        val loadMappings = project.dependencies.create(project.files().builtBy(loadMappingsTask))
+        val configuration = project.configurations.detachedConfiguration()
+
+        configuration.dependencies.addAllLater(minecraftRemapNamespace.map {
+            if (it.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(loadMappings)
+            }
+        })
+
+        configuration
+    }
+
+
+    val datagenDirectoryBuildDependencies: ConfigurableFileCollection = project.files()
+    val datagenClientDirectoryBuildDependencies: ConfigurableFileCollection = project.files()
 
     override val accessWideners get() = main.accessWideners
     override val mixins get() = main.mixins

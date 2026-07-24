@@ -28,14 +28,6 @@ import kotlin.io.path.exists
 internal abstract class ForgeTargetImpl @Inject constructor(name: String) : ForgeLikeTargetImpl(name), ForgeTarget {
     override val runs = objectFactory.newInstance<LexForgeRunConfigurations>(this)
 
-    override val group
-        @Internal
-        get() = "net.minecraftforge"
-
-    override val artifact
-        @Internal
-        get() = "forge"
-
     override val minecraftRemapNamespace: Provider<String>
         get() = providerFactory.provider { MinecraftCodevForgePlugin.SRG_MAPPINGS_NAMESPACE }
 
@@ -46,6 +38,9 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
     }
 
     init {
+        group.convention("net.minecraftforge")
+        artifact.convention("forge")
+
         project.dependencies.add(minecraftLibrariesConfiguration.name, "net.msrandom:codev-forge-runtime:0.1.1")
 
         removeNameMappingService(main)
@@ -59,18 +54,6 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
 
         resolvePatchedMinecraft.configure {
             neoforge.set(false)
-        }
-
-        project.dependencies.registerTransform(RemoveNameMappingService::class) {
-            from
-                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                .attribute(NO_NAME_MAPPING_ATTRIBUTE, false)
-                .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
-
-            to
-                .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
-                .attribute(NO_NAME_MAPPING_ATTRIBUTE, true)
-                .attribute(ClocheTargetAttribute.ATTRIBUTE, target.name)
         }
 
         project.dependencies.registerTransform(RemoveNameMappingService::class) {

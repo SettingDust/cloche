@@ -216,7 +216,7 @@ internal fun createCommonTarget(
         }
 
         configurations.named(sourceSet.compileClasspathConfigurationName) {
-            extendsFrom(intersectionResults.get())
+            extendsFrom(intersectionResults)
 
             attributes(compilation::resolvableAttributes)
         }
