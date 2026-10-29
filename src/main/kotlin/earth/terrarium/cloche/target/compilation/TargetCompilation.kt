@@ -17,6 +17,7 @@ import net.msrandom.minecraftcodev.core.utils.getGlobalCacheDirectory
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.includes.IncludeTargetSource
 import net.msrandom.minecraftcodev.includes.IncludesJar
 import net.msrandom.minecraftcodev.remapper.MinecraftCodevRemapperPlugin
 import net.msrandom.minecraftcodev.remapper.RemapAction
@@ -291,7 +292,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
 
     val includeBucketConfiguration: NamedDomainObjectProvider<DependencyScopeConfiguration> =
         project.configurations.dependencyScope(lowerCamelCaseGradleName(_info.target.featureName, featureName, "include")) {
-            addCollectedDependencies(dependencyHandler.include)
+            addCollectedDependencies(dependencyHandler.ordinaryInclude)
         }
 
     private val includeResolvableConfiguration =
@@ -304,18 +305,37 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
         ) {
             extendsFrom(includeBucketConfiguration)
 
-            this@TargetCompilation.attributes(attributes)
-
-            attributes
-                .attribute(Category.CATEGORY_ATTRIBUTE, objectFactory.named(Category.LIBRARY))
-                .attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
-                .attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objectFactory.named(LibraryElements.JAR))
-                .attributeProvider(CompilationAttributes.DISTRIBUTION, _info.side)
-                .attributeProvider(CompilationAttributes.CLOCHE_SIDE, _info.side.map(ModDistribution::legacyName))
-                .attribute(CompilationAttributes.DATA, _info.data)
-
-            isTransitive = false
+            configureIncludeResolution()
         }
+
+    private fun Configuration.configureIncludeResolution() {
+        this@TargetCompilation.attributes(attributes)
+        attributes
+            .attribute(Category.CATEGORY_ATTRIBUTE, objectFactory.named(Category.LIBRARY))
+            .attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
+            .attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objectFactory.named(LibraryElements.JAR))
+            .attributeProvider(CompilationAttributes.DISTRIBUTION, _info.side)
+            .attributeProvider(CompilationAttributes.CLOCHE_SIDE, _info.side.map(ModDistribution::legacyName))
+            .attribute(CompilationAttributes.DATA, _info.data)
+        isTransitive = false
+    }
+
+    private val includeTargetSources = mutableListOf<Provider<IncludeTargetSource>>()
+
+    init {
+        dependencyHandler.includeTargets.all { record ->
+            val configuration = project.configurations.resolvable(
+                lowerCamelCaseGradleName(_info.target.featureName, featureName, "includeTarget${includeTargetSources.size}Files"),
+            ) {
+                configureIncludeResolution()
+                dependencies.addLater(record.request.map { it.dependency })
+                dependencyConstraints.addAllLater(includeBucketConfiguration.map { it.allDependencyConstraints })
+            }
+            includeTargetSources.add(configuration.zip(record.request) { files, request ->
+                IncludeTargetSource(request.origin, files)
+            })
+        }
+    }
 
     val remapJarTask: TaskProvider<RemapJar>? = if (!_info.test) {
         project.tasks.register<RemapJar>(
@@ -360,7 +380,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal> @Inject c
             input.set(jarFile)
             manifest.fromJars(project.serviceOf(), jarFile)
 
-            fromResolutionResults(includeResolvableConfiguration)
+            fromResolutionSources(includeResolvableConfiguration, project.provider { includeTargetSources.map { it.get() } })
         }
     } else {
         null

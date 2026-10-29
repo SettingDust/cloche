@@ -1,0 +1,1 @@
+<project><modelVersion>4.0.0</modelVersion><groupId>org.fixture</groupId><artifactId>string-lib</artifactId><version>1.2</version><dependencies><dependency><groupId>org.fixture</groupId><artifactId>indirect</artifactId><version>9.9</version></dependency></dependencies></project>

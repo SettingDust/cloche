@@ -148,6 +148,7 @@ private fun TargetCompilation<*>.extendFromDependency(dependency: TargetCompilat
     includeBucketConfiguration.configure {
         extendsFrom(dependency.includeBucketConfiguration)
     }
+    dependency.dependencyHandler.includeTargets.all(dependencyHandler.includeTargets::add)
 
     accessWideners.from(dependency.accessWideners)
     mixins.from(dependency.mixins)

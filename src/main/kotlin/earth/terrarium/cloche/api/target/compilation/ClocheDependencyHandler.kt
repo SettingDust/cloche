@@ -1,6 +1,9 @@
 package earth.terrarium.cloche.api.target.compilation
 
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.target.MinecraftTarget
+import earth.terrarium.cloche.target.compilation.IncludeTargets
+import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.ModuleDependency
 import org.gradle.api.artifacts.dsl.DependencyCollector
 import org.gradle.api.artifacts.dsl.DependencyModifier
@@ -11,7 +14,25 @@ import javax.inject.Inject
 
 @Suppress("UnstableApiUsage")
 abstract class ClocheDependencyHandler @Inject constructor(private val minecraftVersion: Provider<String>) : JvmComponentDependencies {
-    abstract val include: DependencyCollector
+    internal abstract class IncludeCollectors {
+        abstract val ordinary: DependencyCollector
+        abstract val generated: DependencyCollector
+    }
+
+    private val includeCollectors = objectFactory.newInstance<IncludeCollectors>()
+    internal val ordinaryInclude: DependencyCollector get() = includeCollectors.ordinary
+    internal val includeTargets = IncludeTargets().apply {
+        all { includeCollectors.generated.add(it.request.map { request -> request.dependency }) }
+    }
+
+    val include: DependencyCollector = object : DependencyCollector by ordinaryInclude {
+        override fun getDependencies(): Provider<Set<Dependency>> =
+            ordinaryInclude.dependencies.zip(includeCollectors.generated.dependencies) { ordinary, generated -> ordinary + generated }
+    }
+
+    fun include(target: MinecraftTarget) {
+        includeTargets.add(target)
+    }
 
     abstract val api: DependencyCollector
     abstract val compileOnlyApi: DependencyCollector

@@ -32,7 +32,7 @@ internal fun Project.createCompilationVariants(
 
         val compilationCapability = compilation.capabilitySuffix.map {
             "${project.group}:$baseCapabilityName-$it:${project.version}"
-        }.orElse("${project.group}:$baseCapabilityName:${project.version}")
+        }.orElse(provider { "${project.group}:$baseCapabilityName:${project.version}" })
 
         configurations.named(sourceSet.apiElementsConfigurationName) {
             outgoing {
@@ -75,7 +75,7 @@ internal fun Project.createCompilationVariants(
 
         val compilationCapability = compilation.capabilitySuffix.map {
             "${project.group}:$baseCapabilityName-$it:${project.version}"
-        }.orElse("${project.group}:$baseCapabilityName:${project.version}")
+        }.orElse(provider { "${project.group}:$baseCapabilityName:${project.version}" })
 
         val configurationNames = listOf(
             sourceSet.apiElementsConfigurationName,
