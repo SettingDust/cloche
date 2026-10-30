@@ -136,10 +136,7 @@ tasks.register<Test>("includeIdentityTest") {
     workingDir(layout.projectDirectory)
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
     val reportsDirectory = layout.buildDirectory.dir("reports/test/include-identity")
-    reports.html.outputLocation.set(reportsDirectory.map { it.dir("html") })
-    reports.junitXml.outputLocation.set(reportsDirectory.map { it.dir("xml") })
-    binaryResultsDirectory.set(reportsDirectory.map { it.dir("binary") })
-    val temporaryDirectory = reportsDirectory.map { it.dir("tmp") }
+    val temporaryDirectory = layout.buildDirectory.dir("tmp/include-identity/tmp")
     systemProperty("java.io.tmpdir", temporaryDirectory.get().asFile.absolutePath)
     doFirst {
         temporaryDirectory.get().asFile.mkdirs()
@@ -159,9 +156,10 @@ tasks.register<Test>("includeIdentityTest") {
                 }
             }
         }
+        reportsDirectory.get().asFile.mkdirs()
         reportsDirectory.get().file("compile-classpath.txt").asFile.writeText(local.joinToString("\n", postfix = "\n"))
     }
-    inputs.dir(layout.projectDirectory.dir("src/test/resources/include-identity"))
+    inputs.dir(layout.projectDirectory.dir("integration-test/include-identity"))
     inputs.property("includeIdentityCodevRoot", includeIdentityCodevRoot)
     includeIdentityCodevRoot.orNull?.let { systemProperty("fixture.codevRoot", file(it).canonicalPath) }
     systemProperty("fixture.gradleJava", System.getProperty("java.home"))

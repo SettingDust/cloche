@@ -23,7 +23,7 @@ import java.util.zip.ZipInputStream
 
 class IncludeTargetIdentityTests {
     private val reports = Path.of("build/reports/test/include-identity").toAbsolutePath()
-    private val source = Path.of("src/test/resources/include-identity")
+    private val source = Path.of("integration-test/include-identity")
     private val modules = mapOf("string-lib" to "1.2", "provider-lib" to "3.4", "indirect" to "9.9", "existing-lib" to "4.5")
 
     @Test
@@ -358,7 +358,7 @@ class IncludeTargetIdentityTests {
         }
         Files.createDirectories(reports)
         Files.write(reports.resolve("outer-sources.txt"), sources)
-        val directory = Files.createTempDirectory(Files.createDirectories(reports.resolve("fixtures")), "$scenario-")
+        val directory = Files.createTempDirectory(Files.createDirectories(Path.of("build/tmp/include-identity")), "$scenario-")
         println("FIXTURE $scenario $directory")
         val paths =
             listOf("settings.gradle.kts", "build.gradle.kts", "metadata/outer/fabric.mod.json", "metadata/existing/fabric.mod.json") +
