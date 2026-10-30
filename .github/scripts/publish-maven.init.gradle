@@ -1,0 +1,215 @@
+import groovy.xml.XmlSlurper
+import java.nio.file.Files
+import java.security.MessageDigest
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
+
+// This init script targets the repository's pinned Gradle 9.4.0.
+def require = { boolean condition, String message ->
+    if (!condition) throw new GradleException("CI Maven: ${message}")
+}
+def tree = { File directory ->
+    def files = new TreeMap<String, File>()
+    if (directory.exists()) {
+        Files.walk(directory.toPath()).withCloseable { paths ->
+            paths.forEach { path ->
+                require(!Files.isSymbolicLink(path), "symbolic link in Maven tree: ${path}")
+                if (Files.isRegularFile(path)) files[directory.toPath().relativize(path).toString().replace('\\', '/')] = path.toFile()
+            }
+        }
+    }
+    files
+}
+def differences = { File left, File right ->
+    def a = tree(left)
+    def b = tree(right)
+    (a.keySet() + b.keySet()).unique().sort().findAll { path ->
+        !a.containsKey(path) || !b.containsKey(path) || Files.mismatch(a[path].toPath(), b[path].toPath()) != -1
+    }
+}
+def checksums = { File file ->
+    require(file.isFile(), "missing current output ${file}")
+    ['md5': 'MD5', 'sha1': 'SHA-1', 'sha256': 'SHA-256', 'sha512': 'SHA-512'].each { extension, algorithm ->
+        def checksum = new File("${file}.${extension}")
+        require(checksum.isFile(), "missing checksum ${checksum}")
+        def digest = MessageDigest.getInstance(algorithm)
+        file.withInputStream { input ->
+            byte[] buffer = new byte[65536]
+            int count
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+        }
+        require(checksum.text.trim().equalsIgnoreCase(digest.digest().encodeHex().toString()), "invalid checksum ${checksum}")
+    }
+}
+def xml = { File file ->
+    require(file.isFile(), "missing metadata ${file}")
+    new XmlSlurper().parse(file)
+}
+def baselineProperty = gradle.startParameter.projectProperties['ciMavenBaseline']
+def outputProperty = gradle.startParameter.projectProperties['ciMavenOutput']
+require(baselineProperty != null && outputProperty != null, 'ciMavenBaseline and ciMavenOutput are required')
+def baseline = new File(baselineProperty).canonicalFile
+def output = new File(outputProperty).canonicalFile
+require(new File(baselineProperty).absolute && new File(outputProperty).absolute, 'staging paths must be absolute')
+require(!baseline.toPath().startsWith(output.toPath()) && !output.toPath().startsWith(baseline.toPath()), 'baseline and candidate must be disjoint')
+require(!gradle.startParameter.parallelProjectExecutionEnabled, 'use --no-parallel')
+
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin('maven-publish') {
+        require(project.publishing.repositories.findByName('CiMaven') == null, 'CiMaven repository name is reserved')
+        project.publishing.repositories.maven {
+            name = 'CiMaven'
+            url = output.toURI()
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    [baseline, output].each { directory ->
+        require(!directory.toPath().startsWith(root.projectDir.canonicalFile.toPath()), 'Maven staging must be outside the source tree')
+        def local = new File(System.getProperty('maven.repo.local', new File(System.getProperty('user.home'), '.m2/repository').path)).canonicalFile
+        require(!directory.toPath().startsWith(local.toPath()), 'Maven staging must be outside mavenLocal')
+    }
+    def entries = []
+    root.allprojects.each { project ->
+        if (project.plugins.hasPlugin('maven-publish')) {
+            def publications = project.publishing.publications.withType(MavenPublication).toList()
+            require(!publications.empty, "empty publication model in ${project.path}")
+            publications.each { publication ->
+                [publication.groupId, publication.artifactId, publication.version].each { part ->
+                    require(part != null && part ==~ /[A-Za-z0-9_][A-Za-z0-9_.+\-]*/ && !part.contains('..'), "unsafe Maven coordinate ${part}")
+                }
+                def destinations = project.tasks.withType(PublishToMavenRepository).findAll {
+                    it.repository.name == 'CiMaven' && it.publication == publication
+                }
+                require(destinations.size() == 1, "unrepresented/duplicate publication ${project.path}:${publication.name}")
+                def capitalized = publication.name.capitalize()
+                def pom = project.tasks.getByName("generatePomFileFor${capitalized}Publication")
+                def module = project.tasks.findByName("generateMetadataFileFor${capitalized}Publication")
+                def modulePath = "${publication.groupId.replace('.', '/')}/${publication.artifactId}"
+                def entry = [publication: publication, task: destinations[0], pom: pom, module: module,
+                             // Gradle's component provider distinguishes POM-only markers from module publications.
+                             hasModule: module != null && module.enabled && publication.component.present,
+                             modulePath: modulePath, versionPath: "${modulePath}/${publication.version}",
+                             snapshot: publication.version.endsWith('-SNAPSHOT')]
+                require(!entries.any { it.versionPath == entry.versionPath }, "duplicate output ownership ${entry.versionPath}")
+                entries.add(entry)
+                root.logger.lifecycle("CI Maven publication ${project.path} ${publication.name} ${publication.groupId}:${publication.artifactId}:${publication.version} -> ${entry.task.path}")
+            }
+        }
+    }
+    require(!entries.empty, 'empty Maven publication model')
+    def prepare = root.tasks.register('ciPrepareMaven') {
+        doLast {
+            require(baseline.isDirectory() && output.isDirectory(), 'baseline and seeded candidate directories must exist')
+            require(differences(baseline, output).empty, 'candidate must initially equal baseline')
+            entries.each { entry ->
+                if (!entry.snapshot) root.delete(new File(output, entry.versionPath))
+                root.delete(entry.pom.destination)
+                if (entry.hasModule) root.delete(entry.module.outputFile.get().asFile)
+            }
+        }
+    }
+    def currentGeneration = { entry ->
+        require(entry.pom.state.executed && !entry.pom.state.skipped && entry.pom.state.failure == null && entry.pom.destination.isFile(),
+                "current POM generation missing: ${entry.pom.path}")
+        if (entry.hasModule) require(entry.module.state.executed && !entry.module.state.skipped && entry.module.state.failure == null && entry.module.outputFile.get().asFile.isFile(),
+                "current module generation missing: ${entry.module.path}")
+        entry.publication.artifacts.each { artifact ->
+            require(artifact.file.isFile(), "missing current artifact ${artifact.file}")
+        }
+    }
+    entries.eachWithIndex { entry, index ->
+        entry.task.dependsOn(prepare)
+        entry.task.doFirst { currentGeneration(entry) }
+        entry.pom.dependsOn(prepare)
+        if (entry.hasModule) entry.module.dependsOn(prepare)
+        if (index > 0) entry.task.mustRunAfter(entries[index - 1].task)
+    }
+    root.tasks.register('ciPublishMaven') {
+        dependsOn(entries.collect { it.task })
+        doLast {
+            def skipped = []
+            entries.each { entry ->
+                def publication = entry.publication
+                require(entry.task.state.executed && !entry.task.state.skipped && entry.task.state.failure == null,
+                        "destination task did not publish current output: ${entry.task.path}")
+                currentGeneration(entry)
+                def expected = [[extension: 'pom', classifier: '', file: entry.pom.destination]]
+                publication.artifacts.each { artifact ->
+                    expected.add([extension: artifact.extension, classifier: artifact.classifier ?: '', file: artifact.file])
+                }
+                if (entry.hasModule) {
+                    expected.add([extension: 'module', classifier: '', file: entry.module.outputFile.get().asFile])
+                }
+                require(expected.collect { "${it.extension}:${it.classifier}" }.toSet().size() == expected.size(), "duplicate artifacts for ${entry.versionPath}")
+                def snapshotMetadata
+                if (entry.snapshot) {
+                    def metadataFile = new File(output, "${entry.versionPath}/maven-metadata.xml")
+                    snapshotMetadata = xml(metadataFile)
+                    checksums(metadataFile)
+                    require(snapshotMetadata.groupId.text() == publication.groupId && snapshotMetadata.artifactId.text() == publication.artifactId && snapshotMetadata.version.text() == publication.version,
+                            "snapshot metadata coordinates differ: ${metadataFile}")
+                    def selected = snapshotMetadata.versioning.snapshotVersions.snapshotVersion
+                    require(selected.collect { "${it.extension.text()}:${it.classifier.text()}" }.toSet() == expected.collect { "${it.extension}:${it.classifier}" }.toSet(), "snapshot artifact set differs: ${metadataFile}")
+                    def old = new File(baseline, "${entry.versionPath}/maven-metadata.xml")
+                    if (old.exists()) require(snapshotMetadata.versioning.snapshot.buildNumber.text().toInteger() > xml(old).versioning.snapshot.buildNumber.text().toInteger(), "snapshot metadata did not advance: ${metadataFile}")
+                }
+                expected.each { artifact ->
+                    def version = publication.version
+                    if (entry.snapshot) {
+                        def selected = snapshotMetadata.versioning.snapshotVersions.snapshotVersion.findAll {
+                            it.extension.text() == artifact.extension && it.classifier.text() == artifact.classifier
+                        }
+                        require(selected.size() == 1, "ambiguous snapshot entry ${artifact}")
+                        version = selected[0].value.text()
+                        require(version ==~ /[A-Za-z0-9_.+\-]+/ && !version.contains('..') && version.startsWith(publication.version.replaceFirst(/SNAPSHOT$/, '')), 'invalid native snapshot version')
+                    }
+                    def classifier = artifact.classifier ? "-${artifact.classifier}" : ''
+                    def published = new File(output, "${entry.versionPath}/${publication.artifactId}-${version}${classifier}.${artifact.extension}")
+                    checksums(published)
+                    require(artifact.file.isFile() && Files.mismatch(artifact.file.toPath(), published.toPath()) == -1, "output differs from current source: ${published}")
+                }
+                def repositoryMetadata = new File(output, "${entry.modulePath}/maven-metadata.xml")
+                def metadata = xml(repositoryMetadata)
+                checksums(repositoryMetadata)
+                require(metadata.groupId.text() == publication.groupId && metadata.artifactId.text() == publication.artifactId, "repository metadata coordinates differ: ${repositoryMetadata}")
+                def versions = metadata.versioning.versions.version.collect { it.text() }
+                require(versions.contains(publication.version), "current version missing from ${repositoryMetadata}")
+                def oldMetadata = new File(baseline, "${entry.modulePath}/maven-metadata.xml")
+                if (oldMetadata.exists()) require(versions.containsAll(xml(oldMetadata).versioning.versions.version.collect { it.text() }), "metadata lost historical versions: ${repositoryMetadata}")
+                if (!entry.snapshot && new File(baseline, entry.versionPath).exists()) {
+                    def changes = differences(new File(baseline, entry.versionPath), new File(output, entry.versionPath))
+                    require(changes.empty, "release conflict ${entry.versionPath}; version bump required; differing paths: ${changes.join(', ')}")
+                    skipped.add(entry)
+                    root.logger.lifecycle("CI Maven skipped equal release ${entry.versionPath}")
+                }
+                root.logger.lifecycle("CI Maven validated current output ${entry.task.path}")
+            }
+            entries.groupBy { it.modulePath }.each { modulePath, publications ->
+                if (publications.every { skipped.contains(it) }) {
+                    def directory = new File(output, modulePath)
+                    directory.listFiles()?.findAll { it.name == 'maven-metadata.xml' || it.name.startsWith('maven-metadata.xml.') }?.each { root.delete(it) }
+                    new File(baseline, modulePath).listFiles()?.findAll { it.name == 'maven-metadata.xml' || it.name.startsWith('maven-metadata.xml.') }?.each { file ->
+                        Files.copy(file.toPath(), new File(directory, file.name).toPath())
+                    }
+                }
+            }
+            def mutable = [] as Set
+            entries.each { entry ->
+                ['maven-metadata.xml', 'maven-metadata.xml.md5', 'maven-metadata.xml.sha1', 'maven-metadata.xml.sha256', 'maven-metadata.xml.sha512'].each { name ->
+                    mutable.add("${entry.modulePath}/${name}".toString())
+                    if (entry.snapshot) mutable.add("${entry.versionPath}/${name}".toString())
+                }
+            }
+            tree(baseline).each { path, file ->
+                if (!mutable.contains(path)) require(new File(output, path).isFile() && Files.mismatch(file.toPath(), new File(output, path).toPath()) == -1, "historical file changed: ${path}")
+            }
+            if (skipped.size() == entries.size()) {
+                require(differences(baseline, output).empty, 'all-skipped candidate differs from baseline')
+                root.logger.lifecycle('CI Maven all releases skipped; candidate unchanged')
+            } else root.logger.lifecycle('CI Maven candidate ready')
+        }
+    }
+}
