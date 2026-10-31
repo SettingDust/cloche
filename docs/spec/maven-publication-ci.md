@@ -28,9 +28,9 @@ Evidence:
 
 - [Root build](../../build.gradle.kts): plugin declaration, Java attachments, models dependency, and existing publishing repositories.
 - [Settings](../../settings.gradle.kts), [project properties](../../gradle.properties), [models build](../../models/build.gradle.kts), and [IDE build](../../idea/build.gradle.kts).
-- [Wrapper configuration](../../gradle/wrapper/gradle-wrapper.properties): Gradle 9.4.0.
-- Gradle 9.4.0 [plugin development publishing integration](https://docs.gradle.org/9.4.0/userguide/java_gradle_plugin.html#maven_publish_plugin): `pluginMaven` and per-plugin marker publications are configured after evaluation.
-- Gradle 9.4.0 [Maven publishing](https://docs.gradle.org/9.4.0/userguide/publishing_maven.html) and [publication setup](https://docs.gradle.org/9.4.0/userguide/publishing_setup.html): publication identities, repository-specific tasks, file repositories, and generated metadata.
+- [Wrapper configuration](../../gradle/wrapper/gradle-wrapper.properties): Gradle 9.8.2.
+- Gradle 9.8.2 [plugin development publishing integration](https://docs.gradle.org/9.8.2/userguide/java_gradle_plugin.html#maven_publish_plugin): `pluginMaven` and per-plugin marker publications are configured after evaluation.
+- Gradle 9.8.2 [Maven publishing](https://docs.gradle.org/9.8.2/userguide/publishing_maven.html) and [publication setup](https://docs.gradle.org/9.8.2/userguide/publishing_setup.html): publication identities, repository-specific tasks, file repositories, and generated metadata.
 
 ## Entry points and permissions
 

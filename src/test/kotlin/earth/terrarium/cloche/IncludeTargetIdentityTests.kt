@@ -76,8 +76,8 @@ class IncludeTargetIdentityTests {
         assertTrue(result.output.contains("REQUEST :producer late.targets:producer-demo-a"))
         if (withB) assertTrue(result.output.contains("REQUEST :producer late.targets:producer-demo-b"))
         assertTrue(result.output.contains("REQUEST :single late.single:single"))
-        assertTrue(result.output.contains("SELECTED project :producer VARIANT demoARuntimeElements"))
-        if (withB) assertTrue(result.output.contains("SELECTED project :producer VARIANT demoBRuntimeElements"))
+        assertTrue(Regex("SELECTED project '?:producer'? VARIANT demoARuntimeElements").containsMatchIn(result.output))
+        if (withB) assertTrue(Regex("SELECTED project '?:producer'? VARIANT demoBRuntimeElements").containsMatchIn(result.output))
         assertTrue(result.output.contains("TRANSITIVE false"))
         val jar = zip(Files.readAllBytes(directory.resolve("build/included/forge.jar")))
         val metadata = Json.parseToJsonElement(jar.getValue("META-INF/jarjar/metadata.json").decodeToString()).jsonObject
@@ -119,7 +119,7 @@ class IncludeTargetIdentityTests {
     @Test
     fun incompatibleMinecraftTargetFailsOriginalAttributeSelection() {
         val (_, result) = fixture("incompatible", fails = true)
-        assertTrue(result.output.contains("No matching variant of project :producer was found"), result.output)
+        assertTrue(Regex("No matching variant of project '?:producer'?(?: with capability [^\\n]+)? was found").containsMatchIn(result.output), result.output)
         assertTrue(result.output.contains("1.20.2") && result.output.contains("1.20.1"), result.output)
         assertTrue(result.output.contains("io.github.mcgradleconventions.version"), result.output)
     }

@@ -237,35 +237,35 @@ private fun TargetCompilation<*>.addDependencies() {
     }
 }
 
-context(Project)
+context(projectContext: Project)
 internal fun handleTarget(target: MinecraftTargetInternal) {
     fun addCompilation(compilation: TargetCompilation<*>, testName: String? = null) {
         val sourceSet = compilation.sourceSet
 
         if (!compilation.isTest) {
-            createCompilationVariants(compilation, sourceSet, true)
+            projectContext.createCompilationVariants(compilation, sourceSet, true)
         }
 
-        configureSourceSet(sourceSet, target, compilation)
+        projectContext.configureSourceSet(sourceSet, target, compilation)
 
         compilation.addDependencies()
 
         sourceSet.output.dir(mapOf("builtBy" to compilation.generateMetadataTask), compilation.metadataDirectory)
 
-        val copyMixins = tasks.register<Copy>(
+        val copyMixins = projectContext.tasks.register<Copy>(
             lowerCamelCaseGradleName("copy", target.featureName, compilation.featureName, "mixins"),
         ) {
             from(compilation.mixins)
 
             destinationDir =
-                layout.buildDirectory.dir("mixins").get().optionalDir(target.namePath).dir(compilation.namePath).asFile
+                projectContext.layout.buildDirectory.dir("mixins").get().optionalDir(target.namePath).dir(compilation.namePath).asFile
         }
 
-        project.tasks.named<ProcessResources>(sourceSet.processResourcesTaskName) {
+        projectContext.tasks.named<ProcessResources>(sourceSet.processResourcesTaskName) {
             from(copyMixins.map(Copy::getDestinationDir))
         }
 
-        project.withIdeaModule(sourceSet) {
+        projectContext.withIdeaModule(sourceSet) {
             it.resourceDirs.add(copyMixins.get().destinationDir)
         }
 
@@ -277,9 +277,9 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
         val javaVersion = target.minecraftVersion.map {
             getVersionList(
-                getGlobalCacheDirectory(project).toPath(),
+                getGlobalCacheDirectory(projectContext).toPath(),
                 VERSION_MANIFEST_URL,
-                gradle.startParameter.isOffline
+                projectContext.gradle.startParameter.isOffline
             )
                 .version(it)
                 .javaVersion
@@ -287,12 +287,12 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         }
 
         // TODO do the same for the javadoc tasks
-        tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
+        projectContext.tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
             options.release.set(javaVersion)
         }
 
-        plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
-            tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
+        projectContext.plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
+            projectContext.tasks.named<KotlinCompile>(sourceSet.getCompileTaskName("kotlin")) {
                 compilerOptions.jvmTarget.set(javaVersion.map {
                     JvmTarget.fromTarget(JavaVersion.toVersion(it).toString())
                 })
@@ -319,41 +319,41 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
                 continue
             }
 
-            configurations.named(name) {
+            projectContext.configurations.named(name) {
                 // TODO Can this be avoided? maybe publishing remapped Jars in a separate variant if our named namespace is stable(like mojang mappings)?
                 //  Alternatively could we find the exact artifact by checking if the files match? or via the build dependencies?
                 artifacts.clear()
 
-                project.artifacts.add(name, compilation.includeJarTask!!)
+                projectContext.artifacts.add(name, compilation.includeJarTask!!)
             }
         }
 
         if (!compilation.isTest) {
-            configureClassesAndResourcesVariant(sourceSet)
+            projectContext.configureClassesAndResourcesVariant(sourceSet)
         }
 
         for (name in resolvableConfigurationNames) {
-            configurations.named(name) {
+            projectContext.configurations.named(name) {
                 attributes(compilation::resolvableAttributes)
 
                 attributes.attribute(
                     MinecraftOperatingSystemAttribute.attribute,
-                    objects.named(operatingSystemName()),
+                    projectContext.objects.named(operatingSystemName()),
                 )
             }
         }
 
         for (name in consumableConfigurationNames) {
-            configurations.findByName(name)?.attributes(compilation::consumableAttributes)
+            projectContext.configurations.findByName(name)?.attributes(compilation::consumableAttributes)
         }
 
-        configurations.named(sourceSet.compileClasspathConfigurationName) {
+        projectContext.configurations.named(sourceSet.compileClasspathConfigurationName) {
             attributes {
                 attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, named(LibraryElements.CLASSES))
             }
         }
 
-        configurations.named(sourceSet.runtimeClasspathConfigurationName) {
+        projectContext.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
             attributes {
                 attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, named(LibraryElements.CLASSES_AND_RESOURCES))
             }
@@ -362,9 +362,9 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         if (testName != null) {
             val sourceSetName = sourceSetName(target, testName)
 
-            project.extension<SourceSetContainer>().named { it == sourceSetName }.configureEach {
+            projectContext.extension<SourceSetContainer>().named { it == sourceSetName }.configureEach {
                 for (name in listOf(compileClasspathConfigurationName, runtimeClasspathConfigurationName)) {
-                    project.configurations.named(name) {
+                    projectContext.configurations.named(name) {
                         attributes(compilation::resolvableAttributes)
                     }
                 }
@@ -373,7 +373,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
     }
 
     fun configureMainForData(main: TargetCompilation<*>, addGenerated: Boolean) {
-        val runtimeElements = configurations.named(main.sourceSet.runtimeElementsConfigurationName)
+        val runtimeElements = projectContext.configurations.named(main.sourceSet.runtimeElementsConfigurationName)
 
         main.sourceSet.output.dir(mapOf("builtBy" to target.datagenDirectoryBuildDependencies), target.datagenDirectory)
 
@@ -381,7 +381,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
             main.sourceSet.output.dir(mapOf("builtBy" to target.datagenClientDirectoryBuildDependencies), target.datagenClientDirectory)
         }
 
-        configurations.named(main.sourceSet.runtimeElementsConfigurationName) {
+        projectContext.configurations.named(main.sourceSet.runtimeElementsConfigurationName) {
             outgoing {
                 variants {
                     val resourcesWithoutDataVariantName = withoutDataName(LibraryElements.RESOURCES)
@@ -426,7 +426,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
                         })
                     }
 
-                    configureClassesAndResourcesVariant(
+                    projectContext.configureClassesAndResourcesVariant(
                         withoutDataName(CLASSES_AND_RESOURCES_VARIANT_NAME),
                         this@named,
                         resourcesWithoutDataVariantName,
@@ -465,7 +465,7 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
 
             client.sourceSet.output.dir(mapOf("builtBy" to target.datagenClientDirectoryBuildDependencies), target.datagenClientDirectory)
 
-            configurations.named(client.sourceSet.runtimeElementsConfigurationName) {
+            projectContext.configurations.named(client.sourceSet.runtimeElementsConfigurationName) {
                 outgoing {
                     variants {
                         named(LibraryElements.RESOURCES) {
@@ -504,13 +504,13 @@ internal fun handleTarget(target: MinecraftTargetInternal) {
         }
     }
 
-    tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName) {
+    projectContext.tasks.named<DownloadAssets>(target.sourceSet.downloadAssetsTaskName) {
         minecraftVersion.set(target.minecraftVersion)
     }
 
-    tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName) {
+    projectContext.tasks.named<ExtractNatives>(target.sourceSet.extractNativesTaskName) {
         minecraftVersion.set(target.minecraftVersion)
     }
 
-    artifacts.add(Dependency.ARCHIVES_CONFIGURATION, target.finalJar)
+    projectContext.artifacts.add(Dependency.ARCHIVES_CONFIGURATION, target.finalJar)
 }

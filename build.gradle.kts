@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 
 plugins {
     kotlin("plugin.serialization") version embeddedKotlinVersion
-    id("com.google.devtools.ksp") version embeddedKotlinVersion
+    id("com.google.devtools.ksp") version "2.3.12"
 
     `kotlin-dsl`
     `java-gradle-plugin`
@@ -90,7 +90,9 @@ dependencies {
 tasks.compileKotlin {
     compilerOptions {
         jvmDefault = JvmDefaultMode.ENABLE
-        compilerOptions.freeCompilerArgs.add("-Xcontext-receivers")
+        // Keep existing internal JVM names across KGP's module-name default change.
+        moduleName.set(project.name)
+        compilerOptions.freeCompilerArgs.add("-Xcontext-parameters")
     }
 }
 

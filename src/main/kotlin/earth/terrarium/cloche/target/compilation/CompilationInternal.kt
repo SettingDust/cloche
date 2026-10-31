@@ -67,9 +67,9 @@ val SourceSet.externalCompileConfigurationName
 val SourceSet.externalApiConfigurationName
     get() = lowerCamelCaseGradleName(takeUnless(SourceSet::isMain)?.name, "externalApi")
 
-context(Project)
+context(projectContext: Project)
 internal fun getRelevantSyncArtifacts(configurationName: String): Provider<Buildable> =
-    getNonProjectArtifacts(configurations.named(configurationName)).map(ArtifactView::getFiles)
+    getNonProjectArtifacts(projectContext.configurations.named(configurationName)).map(ArtifactView::getFiles)
 
 internal abstract class CompilationInternal : Compilation, Dependencies {
     abstract val isTest: Boolean

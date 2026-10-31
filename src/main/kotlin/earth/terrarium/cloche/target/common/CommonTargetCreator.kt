@@ -74,7 +74,7 @@ private fun convertClasspath(
 internal fun SourceSet.commonBucketConfigurationName(configurationName: String) =
     lowerCamelCaseGradleName(name.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals), "common", configurationName)
 
-context(Project)
+context(projectContext: Project)
 internal fun createCommonTarget(
     commonTarget: CommonTargetInternal,
     onlyCommonOfType: Provider<Boolean>,
@@ -85,7 +85,7 @@ internal fun createCommonTarget(
     ): FileCollection {
         val name = lowerCamelCaseGradleName("create", commonTarget.targetName, compilation.featureName, "apiStub")
 
-        val generateStub = tasks.register<GenerateStubApi>(name) {
+        val generateStub = projectContext.tasks.register<GenerateStubApi>(name) {
             group = "minecraft-stubs"
 
             val jarName = compilation.capabilitySuffix.map {
@@ -94,8 +94,8 @@ internal fun createCommonTarget(
 
             apiFileName.set(jarName.map { "$it-api-stub.jar" } )
 
-            val objects = objects
-            val configurations = configurations
+            val objects = projectContext.objects
+            val configurations = projectContext.configurations
 
             val classpaths = compilations.flatMap {
                 @Suppress("UNCHECKED_CAST")
@@ -114,14 +114,14 @@ internal fun createCommonTarget(
             dependsOn(compilations.map { it.map { it.info.extraClasspathFiles } })
             dependsOn(compilations.map { it.map { it.finalMinecraftFile } })
 
-            dependsOn(files(compilations.map {
+            dependsOn(projectContext.files(compilations.map {
                 it.map {
                     getRelevantSyncArtifacts(it.sourceSet.compileClasspathConfigurationName)
                 }
             }))
         }
 
-        return fileTree(generateStub.flatMap(GenerateStubApi::outputDirectory)).builtBy(generateStub)
+        return projectContext.fileTree(generateStub.flatMap(GenerateStubApi::outputDirectory)).builtBy(generateStub)
     }
 
     fun addCompilation(
@@ -135,19 +135,19 @@ internal fun createCommonTarget(
         }
 
         if (!compilation.isTest) {
-            createCompilationVariants(
+            projectContext.createCompilationVariants(
                 compilation,
                 sourceSet,
                 commonTarget.targetName == MinecraftModLoader.common.name || commonTarget.publish
             )
         }
 
-        configureSourceSet(sourceSet, commonTarget, compilation)
+        projectContext.configureSourceSet(sourceSet, commonTarget, compilation)
 
-        components.named("java") {
+        projectContext.components.named("java") {
             this as AdhocComponentWithVariants
 
-            addVariantsFromConfiguration(configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
+            addVariantsFromConfiguration(projectContext.configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
                 // Common compilations are not runnable.
                 skip()
             }
@@ -155,7 +155,7 @@ internal fun createCommonTarget(
 
         setupConfigurations(compilation)
 
-        val intersectionResults = configurations.dependencyScope(
+        val intersectionResults = projectContext.configurations.dependencyScope(
             lowerCamelCaseGradleName(
                 commonTarget.featureName,
                 compilation.featureName,
@@ -163,7 +163,7 @@ internal fun createCommonTarget(
             )
         )
 
-        dependencies.add(
+        projectContext.dependencies.add(
             intersectionResults.name,
             intersection(compilation, targetCompilations),
         )
@@ -174,7 +174,7 @@ internal fun createCommonTarget(
             attribute(CompilationAttributes.DATA, data)
 
             // afterEvaluate needed as the attributes existing(not just their values) depend on configurable info
-            afterEvaluate {
+            projectContext.afterEvaluate {
                 val commonType = commonTarget.commonType.getOrNull()
                 val minecraftVersion = commonTarget.minecraftVersion.getOrNull()
 
@@ -193,7 +193,7 @@ internal fun createCommonTarget(
             }
         }
 
-        configurations.named(sourceSet.compileClasspathConfigurationName) {
+        projectContext.configurations.named(sourceSet.compileClasspathConfigurationName) {
             extendsFrom(intersectionResults)
 
             attributes(compilation::resolvableAttributes)
@@ -205,32 +205,32 @@ internal fun createCommonTarget(
             sourceSet.javadocElementsConfigurationName,
             sourceSet.sourcesElementsConfigurationName
         )) {
-            configurations.findByName(name)?.attributes(compilation::consumableAttributes)
+            projectContext.configurations.findByName(name)?.attributes(compilation::consumableAttributes)
         }
 
-        dependencies.add(
+        projectContext.dependencies.add(
             sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME),
             "net.msrandom:java-expect-actual-annotations:1.0.0",
         )
 
-        dependencies.add(
+        projectContext.dependencies.add(
             sourceSet.annotationProcessorConfigurationName,
             JAVA_EXPECT_ACTUAL_ANNOTATION_PROCESSOR
         )
 
-        tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
+        projectContext.tasks.named<JavaCompile>(sourceSet.compileJavaTaskName) {
             options.compilerArgs.add("-A$GENERATE_JAVA_EXPECT_STUBS_OPTION")
         }
 
-        plugins.withId(KOTLIN_JVM_PLUGIN_ID) {
+        projectContext.plugins.withId(KOTLIN_JVM_PLUGIN_ID) {
             val pluginClasspathConfigurationName = lowerCamelCaseGradleName(PLUGIN_CLASSPATH_CONFIGURATION_NAME, sourceSet.name)
 
-            dependencies.add(
+            projectContext.dependencies.add(
                 pluginClasspathConfigurationName,
                 KOTLIN_MULTIPLATFORM_STUB_PLUGIN,
             )
 
-            project.dependencies.add(
+            projectContext.dependencies.add(
                 sourceSet.compileOnlyConfigurationName,
                 "net.msrandom:kmp-stub-annotations:1.0.0",
             )
