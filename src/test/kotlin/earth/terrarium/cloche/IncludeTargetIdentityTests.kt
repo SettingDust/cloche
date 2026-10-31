@@ -322,35 +322,24 @@ class IncludeTargetIdentityTests {
         scenario: String,
         fails: Boolean = false,
     ): Pair<Path, BuildResult> {
-        val localBuild =
-            File(
-                checkNotNull(System.getProperty("fixture.codevRoot")),
-                "minecraft-codev-includes/build",
-            ).canonicalFile.toPath()
-        val codevRoot = File(checkNotNull(System.getProperty("fixture.codevRoot"))).canonicalFile.toPath()
         val sources = mutableListOf<String>()
-        listOf(
-            IncludedJarInfo::class.java,
-            IncludesJar::class.java,
-            IncludeTargetOrigin::class.java,
-            IncludeTargetSource::class.java,
-            ResolvedIncludeSource::class.java,
-            MinecraftCodevPlugin::class.java,
-            Class.forName("net.msrandom.minecraftcodev.annotations.UnsafeForClient"),
-        ).forEach { type ->
+        val implementations = mapOf(
+            IncludedJarInfo::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+            IncludesJar::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+            IncludeTargetOrigin::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+            IncludeTargetSource::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+            ResolvedIncludeSource::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+            MinecraftCodevPlugin::class.java to "minecraft-codev-core-0.1.0+terrarium.0.7.2.jar",
+            Class.forName("net.msrandom.minecraftcodev.annotations.UnsafeForClient") to "side-annotations-1.0.1.jar",
+        )
+        implementations.forEach { (type, expected) ->
             val origin =
                 Path
                     .of(
                         type.protectionDomain.codeSource.location
                             .toURI(),
                     ).toRealPath()
-            val expected =
-                when (type) {
-                    MinecraftCodevPlugin::class.java -> codevRoot.resolve("minecraft-codev-core/build")
-                    Class.forName("net.msrandom.minecraftcodev.annotations.UnsafeForClient") -> codevRoot.resolve("minecraft-codev-core/side-annotations/build")
-                    else -> localBuild
-                }
-            assertTrue(origin.startsWith(expected), "$type came from $origin")
+            assertTrue(Files.isRegularFile(origin) && origin.fileName.toString() == expected, "$type came from $origin")
             val resources = type.classLoader.getResources(type.name.replace('.', '/') + ".class").toList()
             assertEquals(1, resources.size, "Duplicate includes implementations: $resources")
             sources.add("CODE_SOURCE ${type.name} $origin RESOURCES ${resources.size}")
@@ -390,17 +379,8 @@ class IncludeTargetIdentityTests {
                 .withProjectDir(directory.toFile())
                 .withPluginClasspath()
                 .withTestKitDir(home)
-        assertFalse(
-            runner.pluginClasspath.any {
-                it.name.matches(Regex("(minecraft-codev-includes|minecraft-codev-core|side-annotations)-.*\\.jar"))
-            },
-        )
-        listOf(
-            localBuild.resolve("classes/kotlin/main"),
-            codevRoot.resolve("minecraft-codev-core/build/classes/kotlin/main"),
-            codevRoot.resolve("minecraft-codev-core/side-annotations/build/classes/java/main"),
-        ).forEach { expected ->
-            assertTrue(runner.pluginClasspath.any { it.canonicalFile.toPath() == expected })
+        implementations.values.toSet().forEach { expected ->
+            assertEquals(1, runner.pluginClasspath.count { it.isFile && it.name == expected }, "Missing or duplicate published JAR: $expected")
         }
         val arguments =
             mutableListOf(
@@ -412,7 +392,6 @@ class IncludeTargetIdentityTests {
                 home.path,
                 "-Dorg.gradle.java.home=" + System.getProperty("fixture.gradleJava"),
                 "-PfixtureScenario=$scenario",
-                "-PlocalCodevRoot=$codevRoot",
             )
         System.getProperty("org.gradle.java.installations.paths")?.let { arguments.add("-Porg.gradle.java.installations.paths=$it") }
         try {

@@ -20,27 +20,27 @@ import org.gradle.api.attributes.Usage
 plugins { id("earth.terrarium.cloche") }
 
 val scenario = providers.gradleProperty("fixtureScenario").get()
-val codevRoot = file(providers.gradleProperty("localCodevRoot").get()).canonicalFile.toPath()
 println(
     "FIXTURE_TOOLCHAIN Gradle ${gradle.gradleVersion} JVM ${System.getProperty(
         "java.version",
     )} ${System.getProperty("java.home")} HOME ${gradle.gradleUserHomeDir}",
 )
-listOf(
-    IncludedJarInfo::class.java,
-    IncludesJar::class.java,
-    IncludeTargetOrigin::class.java,
-    IncludeTargetSource::class.java,
-    ResolvedIncludeSource::class.java,
-    MinecraftCodevPlugin::class.java,
-    Class.forName("net.msrandom.minecraftcodev.annotations.UnsafeForClient"),
-).forEach { type ->
+mapOf(
+    IncludedJarInfo::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+    IncludesJar::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+    IncludeTargetOrigin::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+    IncludeTargetSource::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+    ResolvedIncludeSource::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
+    MinecraftCodevPlugin::class.java to "minecraft-codev-core-0.1.0+terrarium.0.7.2.jar",
+    Class.forName("net.msrandom.minecraftcodev.annotations.UnsafeForClient") to "side-annotations-1.0.1.jar",
+).forEach { (type, expected) ->
     val source =
         File(
             type.protectionDomain.codeSource.location
                 .toURI(),
         ).canonicalFile.toPath()
-    check(source.startsWith(codevRoot)) { "Nonlocal implementation: $type $source" }
+    // TestKit may instrument the published JAR without changing its artifact suffix.
+    check(source.toFile().isFile && source.fileName.toString().endsWith(expected)) { "Unexpected implementation: $type $source" }
     val resources = type.classLoader.getResources(type.name.replace('.', '/') + ".class").toList()
     check(resources.size == 1) { "Duplicate implementation: $type $resources" }
     println("CODE_SOURCE ${type.name} $source RESOURCES ${resources.size}")

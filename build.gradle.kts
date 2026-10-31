@@ -23,6 +23,24 @@ gradlePlugin {
 }
 
 repositories {
+    exclusiveContent {
+        forRepository {
+            maven("https://raw.githubusercontent.com/SettingDust/minecraft-codev/maven/")
+        }
+        filter {
+            listOf("core", "forge", "fabric", "mixins", "runs", "access-widener", "remapper", "decompiler", "includes").forEach {
+                includeModule("net.msrandom", "minecraft-codev-$it")
+            }
+        }
+    }
+    exclusiveContent {
+        forRepository {
+            maven("https://raw.githubusercontent.com/SettingDust/jvm-multiplatform/maven/")
+        }
+        filter {
+            includeModule("net.msrandom", "classpath-api-stubs")
+        }
+    }
     mavenCentral()
 
     maven(url = "https://maven.fabricmc.net/")
@@ -38,19 +56,19 @@ java {
 }
 
 dependencies {
-    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.9.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.6.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.3")
-    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0")
-    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5")
+    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.1.1+terrarium.0.9.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.1.1+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.1.1+terrarium.0.6.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.1.0+terrarium.0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.1.0+terrarium.0.6.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.1.0+terrarium.0.6.5")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
     implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6")
-    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.12")
+    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.0+terrarium.0.1.12")
 
     implementation(group = "net.peanuuutz.tomlkt", name = "tomlkt", version = "0.5.0")
     implementation(group = "org.apache.groovy", name = "groovy-toml", version = "5.0.2")
@@ -109,24 +127,6 @@ tasks.test {
     dependsOn(tasks.pluginUnderTestMetadata)
 }
 
-val includeIdentityCodevRoot = providers.gradleProperty("includeIdentityCodevRoot")
-includeIdentityCodevRoot.orNull?.let { codevRoot ->
-    tasks.pluginUnderTestMetadata {
-        val runtimeClasspath = sourceSets.main.get().runtimeClasspath
-        // Directory entries retain local codeSource when TestKit instruments the plugin classpath.
-        pluginClasspath.setFrom(
-            runtimeClasspath.filter { !it.name.matches(Regex("(minecraft-codev-includes|minecraft-codev-core|side-annotations)-.*\\.jar")) },
-            files(
-                "$codevRoot/minecraft-codev-includes/build/classes/kotlin/main",
-                "$codevRoot/minecraft-codev-includes/build/resources/main",
-                "$codevRoot/minecraft-codev-core/build/classes/kotlin/main",
-                "$codevRoot/minecraft-codev-core/build/resources/main",
-                "$codevRoot/minecraft-codev-core/side-annotations/build/classes/java/main",
-                "$codevRoot/minecraft-codev-core/side-annotations/build/resources/main",
-            ).builtBy(runtimeClasspath),
-        )
-    }
-}
 tasks.register<Test>("includeIdentityTest") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
@@ -140,28 +140,30 @@ tasks.register<Test>("includeIdentityTest") {
     systemProperty("java.io.tmpdir", temporaryDirectory.get().asFile.absolutePath)
     doFirst {
         temporaryDirectory.get().asFile.mkdirs()
-        val root = file(includeIdentityCodevRoot.get()).canonicalFile
-        val local = listOf("compileClasspath", "runtimeClasspath").flatMap { name ->
+        val expected = configurations.implementation.get().dependencies
+            .filter { it.group == "net.msrandom" && it.name.startsWith("minecraft-codev-") }
+            .associate { it.name to it.version }
+        check(expected.size == 9)
+        val published = listOf("compileClasspath", "runtimeClasspath").flatMap { name ->
             val artifacts = configurations.getByName(name).incoming.artifacts.artifacts
-            val modules = listOf("minecraft-codev-includes", "minecraft-codev-core") +
-                if (name == "runtimeClasspath") listOf("side-annotations") else emptyList()
-            modules.flatMap { module ->
+            expected.flatMap { (module, version) ->
                 val selected = artifacts.filter {
-                    (it.id.componentIdentifier as? org.gradle.api.artifacts.component.ProjectComponentIdentifier)?.projectName == module
+                    val id = it.id.componentIdentifier as? org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    id?.group == "net.msrandom" && id.module == module
                 }
-                check(selected.isNotEmpty()) { "No local $name project dependency for $module: $artifacts" }
+                check(selected.size == 1) { "Expected one published $name dependency for $module: $artifacts" }
                 selected.map { artifact ->
-                    check(artifact.file.canonicalFile.toPath().startsWith(root.toPath())) { "Nonlocal $name dependency: $artifact" }
-                    "$name $module ${artifact.id.componentIdentifier} ${artifact.file.canonicalPath}"
+                    val id = artifact.id.componentIdentifier as org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    check(id.version == version) { "Unexpected $name version: $id, expected $version" }
+                    check(artifact.file.isFile && artifact.file.name == "$module-$version.jar") { "Not a published JAR: $artifact" }
+                    "$name $id ${artifact.file.canonicalPath}"
                 }
             }
         }
         reportsDirectory.get().asFile.mkdirs()
-        reportsDirectory.get().file("compile-classpath.txt").asFile.writeText(local.joinToString("\n", postfix = "\n"))
+        reportsDirectory.get().file("compile-classpath.txt").asFile.writeText(published.joinToString("\n", postfix = "\n"))
     }
     inputs.dir(layout.projectDirectory.dir("integration-test/include-identity"))
-    inputs.property("includeIdentityCodevRoot", includeIdentityCodevRoot)
-    includeIdentityCodevRoot.orNull?.let { systemProperty("fixture.codevRoot", file(it).canonicalPath) }
     systemProperty("fixture.gradleJava", System.getProperty("java.home"))
     systemProperty("fixture.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
     systemProperty("org.gradle.testkit.dir", gradle.gradleUserHomeDir.absolutePath)

@@ -57,7 +57,7 @@ fun applyToProject(target: Project) {
     target.apply<MinecraftCodevIncludesPlugin<*>>()
     target.apply<MinecraftCodevDecompilerPlugin<*>>()
     target.apply<MinecraftCodevAccessWidenerPlugin<*>>()
-    target.apply<MinecraftCodevMixinsPlugin<*>>()
+    target.apply<MinecraftCodevMixinsPlugin>()
     target.apply<MinecraftCodevRunsPlugin<*>>()
 
     target.apply<JavaVirtualSourceSetsPlugin>()
