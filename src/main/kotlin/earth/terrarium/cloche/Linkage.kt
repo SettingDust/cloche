@@ -102,15 +102,20 @@ context(projectContext: Project)
 internal fun CommonCompilation.addClasspathDependency(dependency: CommonCompilation) {
     println("(classpath dependency) $this -> $dependency")
 
-    projectContext.dependencies.add(sourceSet.compileOnlyConfigurationName, project().apply {
-        capabilities {
-            if (dependency.capabilitySuffix.isPresent) {
-                requireFeature(dependency.capabilitySuffix)
+    if (dependency.isTest) {
+        sourceSet.compileClasspath += dependency.sourceSet.output
+        sourceSet.runtimeClasspath += dependency.sourceSet.output
+    } else {
+        projectContext.dependencies.add(sourceSet.compileOnlyConfigurationName, project().apply {
+            capabilities {
+                if (dependency.capabilitySuffix.isPresent) {
+                    requireFeature(dependency.capabilitySuffix)
+                }
             }
-        }
 
-        attributes(dependency::baseAttributes)
-    })
+            attributes(dependency::baseAttributes)
+        })
+    }
 
     if (!isTest && !dependency.isTest) {
         projectContext.artifacts {
@@ -161,15 +166,26 @@ context(projectContext: Project)
 internal fun TargetCompilation<*>.addClasspathDependency(dependency: TargetCompilation<*>) {
     println("(classpath dependency) $this -> $dependency")
 
-    projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
-        capabilities {
-            if (dependency.capabilitySuffix.isPresent) {
-                requireFeature(dependency.capabilitySuffix)
+    if (dependency.isTest) {
+        sourceSet.compileClasspath += dependency.sourceSet.output
+        sourceSet.runtimeClasspath += dependency.sourceSet.output
+    } else {
+        projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
+            capabilities {
+                if (dependency.capabilitySuffix.isPresent) {
+                    requireFeature(dependency.capabilitySuffix)
+                }
             }
-        }
 
-        attributes(dependency::baseAttributes)
-    })
+            attributes(dependency::baseAttributes)
+        })
+    }
+
+    // Test compilations have no outgoing feature; their incoming project/output roles remain native.
+    if (isTest) {
+        extendFromDependency(dependency)
+        return
+    }
 
     val apiElementsClasses = projectContext.configurations.named(dependency.sourceSet.apiElementsConfigurationName).flatMap {
         it.outgoing.variants.named(LibraryElements.CLASSES)

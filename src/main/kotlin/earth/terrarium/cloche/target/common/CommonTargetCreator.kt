@@ -144,12 +144,14 @@ internal fun createCommonTarget(
 
         projectContext.configureSourceSet(sourceSet, commonTarget, compilation)
 
-        projectContext.components.named("java") {
-            this as AdhocComponentWithVariants
+        if (!compilation.isTest) {
+            projectContext.components.named("java") {
+                this as AdhocComponentWithVariants
 
-            addVariantsFromConfiguration(projectContext.configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
-                // Common compilations are not runnable.
-                skip()
+                addVariantsFromConfiguration(projectContext.configurations.getByName(sourceSet.runtimeElementsConfigurationName)) {
+                    // Common compilations are not runnable.
+                    skip()
+                }
             }
         }
 

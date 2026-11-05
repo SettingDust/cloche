@@ -219,6 +219,8 @@ private fun TargetCompilation<*>.addDependencies() {
         extendModRuntimeClasspath()
     }
 
+    if (isTest) return
+
     project.configurations.named(sourceSet.apiElementsConfigurationName) {
         extendsFrom(project.configurations.named(modConfigurationName(sourceSet.apiConfigurationName)))
         extendsFrom(project.configurations.named(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)))
