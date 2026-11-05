@@ -26,13 +26,7 @@ internal fun Project.createCompilationVariants(
             java.withSourcesJar()
         }
 
-        val baseCapabilityName = compilation.target.capabilitySuffix?.let {
-            "${project.name}-$it"
-        } ?: project.name
-
-        val compilationCapability = compilation.capabilitySuffix.map {
-            "${project.group}:$baseCapabilityName-$it:${project.version}"
-        }.orElse(provider { "${project.group}:$baseCapabilityName:${project.version}" })
+        val compilationCapability = compilation.capability
 
         configurations.named(sourceSet.apiElementsConfigurationName) {
             outgoing {
@@ -69,13 +63,7 @@ internal fun Project.createCompilationVariants(
         }
 
         // We cannot use lazy capabilities in FeatureSpec yet, thus manually add lazy extra capability to all relevant configurations
-        val baseCapabilityName = compilation.target.capabilitySuffix?.let {
-            "${project.name}-$it"
-        } ?: project.name
-
-        val compilationCapability = compilation.capabilitySuffix.map {
-            "${project.group}:$baseCapabilityName-$it:${project.version}"
-        }.orElse(provider { "${project.group}:$baseCapabilityName:${project.version}" })
+        val compilationCapability = compilation.capability
 
         val configurationNames = listOf(
             sourceSet.apiElementsConfigurationName,

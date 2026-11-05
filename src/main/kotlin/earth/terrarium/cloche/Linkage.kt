@@ -108,9 +108,7 @@ internal fun CommonCompilation.addClasspathDependency(dependency: CommonCompilat
     } else {
         projectContext.dependencies.add(sourceSet.compileOnlyConfigurationName, project().apply {
             capabilities {
-                if (dependency.capabilitySuffix.isPresent) {
-                    requireFeature(dependency.capabilitySuffix)
-                }
+                requireCapability(dependency.capability)
             }
 
             attributes(dependency::baseAttributes)
@@ -172,9 +170,7 @@ internal fun TargetCompilation<*>.addClasspathDependency(dependency: TargetCompi
     } else {
         projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
             capabilities {
-                if (dependency.capabilitySuffix.isPresent) {
-                    requireFeature(dependency.capabilitySuffix)
-                }
+                requireCapability(dependency.capability)
             }
 
             attributes(dependency::baseAttributes)
@@ -224,9 +220,7 @@ internal fun TargetCompilation<*>.addDataClasspathDependency(dependency: TargetC
 
     projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
         capabilities {
-            if (dependency.capabilitySuffix.isPresent) {
-                requireFeature(dependency.capabilitySuffix)
-            }
+            requireCapability(dependency.capability)
         }
 
         attributes {

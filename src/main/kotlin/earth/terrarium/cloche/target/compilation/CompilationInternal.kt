@@ -121,6 +121,15 @@ internal abstract class CompilationInternal : Compilation, Dependencies {
             base?.replace(TARGET_NAME_PATH_SEPARATOR, '-')
         }
 
+    val capability: Provider<String>
+        get() {
+            val baseName = target.capabilitySuffix?.let { "${project.name}-$it" } ?: project.name
+            return capabilitySuffix
+                .map {
+                    "${project.group}:$baseName-$it:${project.version}"
+                }.orElse(project.provider { "${project.group}:$baseName:${project.version}" })
+        }
+
     val namePath
         get() = name.replace(TARGET_NAME_PATH_SEPARATOR, '/')
 
