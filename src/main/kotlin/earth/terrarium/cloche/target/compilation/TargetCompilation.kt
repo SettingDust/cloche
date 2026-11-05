@@ -114,7 +114,7 @@ internal fun registerCompilationTransformations(
     namedMinecraftFile: Provider<RegularFile>,
     extraClasspathFiles: Provider<List<RegularFile>>,
 ): FinalJarTasks {
-    val outputDirectory = target.outputDirectory.map { it.dir(compilationName) }
+    val outputDirectory = target.outputDirectory.map { it.dir(lowerCamelCaseGradleName(compilationName)) }
 
     val collapsedName = compilationName.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals)
 
