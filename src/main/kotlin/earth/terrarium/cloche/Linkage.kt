@@ -95,6 +95,24 @@ private fun SourceSet.extendConfigurations(dependency: SourceSet, common: Boolea
     )
 }
 
+context(projectContext: Project)
+private fun addProjectDependency(
+    dependency: CompilationInternal,
+    configurationName: String,
+    withoutData: Boolean = false,
+) {
+    projectContext.dependencies.add(configurationName, dependency.project().apply {
+        capabilities {
+            requireCapability(dependency.capability)
+        }
+
+        attributes {
+            if (withoutData) attribute(WITHOUT_DATA_ATTRIBUTE, true)
+            dependency.baseAttributes(this)
+        }
+    })
+}
+
 /**
  * Depend on the api configuration of [dependency]
  */
@@ -106,13 +124,7 @@ internal fun CommonCompilation.addClasspathDependency(dependency: CommonCompilat
         sourceSet.compileClasspath += dependency.sourceSet.output
         sourceSet.runtimeClasspath += dependency.sourceSet.output
     } else {
-        projectContext.dependencies.add(sourceSet.compileOnlyConfigurationName, project().apply {
-            capabilities {
-                requireCapability(dependency.capability)
-            }
-
-            attributes(dependency::baseAttributes)
-        })
+        addProjectDependency(dependency, sourceSet.compileOnlyConfigurationName)
     }
 
     if (!isTest && !dependency.isTest) {
@@ -168,13 +180,7 @@ internal fun TargetCompilation<*>.addClasspathDependency(dependency: TargetCompi
         sourceSet.compileClasspath += dependency.sourceSet.output
         sourceSet.runtimeClasspath += dependency.sourceSet.output
     } else {
-        projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
-            capabilities {
-                requireCapability(dependency.capability)
-            }
-
-            attributes(dependency::baseAttributes)
-        })
+        addProjectDependency(dependency, modConfigurationName(sourceSet.localImplementationConfigurationName))
     }
 
     // Test compilations have no outgoing feature; their incoming project/output roles remain native.
@@ -218,16 +224,7 @@ context(projectContext: Project)
 internal fun TargetCompilation<*>.addDataClasspathDependency(dependency: TargetCompilation<*>) {
     println("(data classpath dependency) $this -> $dependency")
 
-    projectContext.dependencies.add(modConfigurationName(sourceSet.localImplementationConfigurationName), project().apply {
-        capabilities {
-            requireCapability(dependency.capability)
-        }
-
-        attributes {
-            attribute(WITHOUT_DATA_ATTRIBUTE, true)
-            dependency.baseAttributes(this)
-        }
-    })
+    addProjectDependency(dependency, modConfigurationName(sourceSet.localImplementationConfigurationName), withoutData = true)
 
     val apiElementsClasses = projectContext.configurations.named(dependency.sourceSet.apiElementsConfigurationName).flatMap {
         it.outgoing.variants.named(LibraryElements.CLASSES)
