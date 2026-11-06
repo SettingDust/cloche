@@ -14,6 +14,7 @@ import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.ClocheTargetInternal
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.util.optionalDir
+import earth.terrarium.cloche.util.withIdeaModel
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import org.gradle.api.Action
 import org.gradle.api.Buildable
@@ -229,7 +230,7 @@ internal fun Project.configureSourceSet(
         }
     }
 
-/*    if (compilation is TargetCompilation<*>) {
+    if (compilation is TargetCompilation<*>) {
         withIdeaModel {
             syncTask.configure {
                 if (it.module.isDownloadSources) {
@@ -237,7 +238,7 @@ internal fun Project.configureSourceSet(
                 }
             }
         }
-    }*/
+    }
 
     if (compilation.isTest) {
         return
