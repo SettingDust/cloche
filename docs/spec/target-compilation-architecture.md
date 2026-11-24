@@ -16,9 +16,9 @@
 
 ### 规范衔接
 
-compilation 的原 `setupFiles` 是唯一原位组合与注册真源；[Mixin 统一转换职责](mixin-preapplication.md#compilation-统一转换职责)、其 Task/Transform 依赖图及 V3 与本文第 5 节采用同一所有权，不要求 `registerCompilationTransformations` 作为内部全量总入口。必要旧入口仅按第 8 节提供兼容适配，不构成第二条装配路径。
+compilation 的原 `setupFiles` 是唯一原位组合与注册真源；[Mixin 统一转换职责](mixin-preapplication.md#compilation-统一转换职责)、其 Task/Transform 依赖图及 V3 与本文第 5 节采用同一所有权，不要求 `registerCompilationTransformations` 作为内部全量总入口，也不要求保留旧内部适配入口；第 8 节明确保留的出口不构成第二条装配路径。
 
-本文拥有内部固定拓扑、阶段投影与兼容合同，Mixin owner 继续拥有有效环境、分片与 records/state、四消费者精确文件及失败/缓存合同。两者必须同时成立：Mixin 的输入表述须与本文 Joined/Split 形状及第 8 节旧 Map/String 边界一致，旧 Map 兼容许可不得作为内部各阶段继续以 Map 为主载体的例外。Info 纯输入、无平台强转/nullable 哨兵、唯一注册、身份、完整消费与生产时序义务不因模型或入口变化而放宽。各 owner 的历史 authority/验收记录保持其原范围，组织条款一致不等于模型衔接、实现或动态验收已经全部完成。
+本文拥有内部固定拓扑、阶段投影与兼容合同，Mixin owner 继续拥有有效环境、分片与 records/state、四消费者精确文件及失败/缓存合同。两者必须同时成立：Mixin 的输入表述须与本文 Joined/Split 形状及第 8 节已收窄的内部兼容边界一致，不保留旧 Info Map/String 或 preview 适配入口，也不得继续以 Map 作为内部各阶段的主载体。Info 纯输入、无平台强转/nullable 哨兵、唯一注册、身份、完整消费与生产时序义务不因模型或入口变化而放宽。各 owner 的历史 authority/验收记录保持其原范围，组织条款一致不等于模型衔接、实现或动态验收已经全部完成。
 
 本文不修改 PRD、ADR、Mixin Spec、发布或 Codev authority；不规定实施步骤或任务图，不形成实施许可或 readiness 判断。不增加公开 DSL、职责服务、总 context、registry、通用 pipeline、freeze 或调度器。不修角色精度、Forge clientTest、sources/javadoc 普通布尔时序、Common 环/孤立语义或测试环境迁移；正式依赖升版、发布、提交和推送不在本范围。最终 IDE 验证沿 Mixin owner 的取消决定，不换名恢复。
 
@@ -34,7 +34,7 @@ Common 是共享源码关系及既有参与 target 的 API 交集，不是游戏
 
 ### 固定游戏拓扑与句柄阶段
 
-内部游戏主载体必须采用泛型纯数据的有限形状，本文记为 `GameShards<T>`：单片 `Joined(value)` 或双片 `Split(common, client)`。同形结构贯穿 named、AW 后、Mixin 派生与 Strip 后游戏句柄，以及内部 Mixin `TaskProvider` 角色投影；映射、选择和注册由显式输入的函数承担，容器不提供职责方法、注册能力、可执行闭包或状态管理。`T` 复用句柄槽位及任务→输出/records 配对，不增加逐阶段 wrapper、phantom type 或执行器。具体类型、字段和函数标识符可以调整，有限形状及投影语义已接受，不再作为未选方案。
+内部游戏主载体必须采用泛型纯数据的有限形状，本文记为 `GameShards<T>`：单片 `Joined(value)` 或双片 `Split(common, client)`；内部角色使用 typed `Part`。同形结构贯穿 named、AW 后、Mixin 派生与 Strip 后游戏句柄，以及内部 Mixin `TaskProvider` 角色投影；映射、选择和注册由显式输入的函数承担，容器不提供职责方法、注册能力、可执行闭包或状态管理。`T` 复用句柄槽位及任务→输出/records 配对，不增加逐阶段 wrapper、phantom type 或执行器。具体类型、字段和函数标识符可以调整，有限形状及投影语义已接受，不再作为未选方案。
 
 文件阶段可分别记为 named、`awGames` 和 `strippedGames`；后者必须是 AW→Mixin→Strip 的最终游戏结果，不代表 vanilla 或全部编译依赖。容器类型本身不证明实际字节阶段、primary 合法、producer 完整、文件物化或任务执行；各阶段必须绑定对应原生产句柄并按第 6、9 节验证。运行辅助 extra、外部依赖和完整消费输入各守原协议，不强塞进游戏拓扑。
 
@@ -92,7 +92,7 @@ joined 输出必须继续惰性依赖原 `minecraftVersion`、`loaderVersion`、
 
 ## 5. setupFiles 的唯一原位组合
 
-内部主组织必须是 compilation 构造中原 `setupFiles` 位置直接组合窄函数，不再把全量输入转发给另一个总入口，也不把同一流程复制到平台。各项 Gradle 注册在原位置执行一次，不能放进可重复求值的 Provider 闭包。必要旧签名的兼容保留按第 8 节处理。
+内部主组织必须是 compilation 构造中原 `setupFiles` 位置直接组合窄函数，不再把全量输入转发给另一个总入口，也不把同一流程复制到平台。各项 Gradle 注册在原位置执行一次，不能放进可重复求值的 Provider 闭包。第 8 节明确保留的出口合同不要求恢复旧内部签名。
 
 组合必须保持 preview AW → 原本需要的本地 runtime 辅助 AW → Mixin/Strip → sources 的注册先后。固定分片拓扑与 Provider 延迟的 enabled、side、primary 选择必须分开；不得靠 nullable 哨兵、平台强转、占位 Property 回填、任务工厂或新全局阶段完成初始化。Info 继续只提供输入，在组合点展开实际所需内容，不把整个 Info/compilation 传入每个机制函数。side 的家族事实由装配显式提供，不从名称前缀猜测。
 
@@ -165,9 +165,11 @@ run 保留自己的原 Provider 回退：Fabric server 取 main、client 取独�
 
 现有 `earth.terrarium.cloche.target.compilation.FinalJarTasks` 是无 internal 修饰的 data class。必须保持其包/类身份、data class 生成接口、原构造字段的名称、顺序和类型，以及原 getters：`accessWidenTask: TaskProvider<AccessWiden>`、`decompileTask: TaskProvider<Decompile>`、`runtimeExtraFiles: Provider<List<RegularFile>>`、`compileMinecraftFiles: Provider<List<RegularFile>>`、`preapplyMixinsTasks: Provider<List<TaskProvider<Mixin>>>`，并保留 `libraryArtifact`、`sourcesArtifact`。`setupFiles` 保持 protected 及原类型；`finalMinecraftFile`、`sources` 和原 compile/runtime/operation getter 继续投影同组结果。不能因新内部消费结果更窄而删除或重排旧字段。
 
-必要旧 Map/String 入口只在兼容边界校验并单向转成新形状或角色：named Map 的完整键集合必须恰为 `{joined}` 或 `{common, client}`，空、缺键、额外键或混合形状必须失败；primary 的旧 common/client/joined 标签必须精确转换，未知标签或与 Joined/Split 不匹配时在相应边界求值失败，不默认选片。旧 `primaryMinecraftPart: Provider<String>` 等可见 getter 必须继续投影原 common/client/joined 字符串值；即使 JVM 泛型擦除后 descriptor 相同，也不得把值协议改为 enum。新内部角色可以用枚举等有限表示，必要反向 getter 仅投影原标签/槽位，不得逐阶段往返 Map、排序或重新注册。既有 Info/fixture 对字符串值和键的观察属于兼容核对输入，不能仅改测试期望就宣称兼容。
+按用户在获知删除范围与影响后的确认，本规范取消以下旧内部兼容承诺：`TargetHandler` 的 synthetic accessor（包括手写 `access$addDependencies$...`）、`GameShards` 的 Map/String 适配、`TargetCompilationInfo` 的 Map/String 构造及 getter（包括旧 `primaryMinecraftPart: Provider<String>`），以及旧 `registerMixinPreapplication` preview adapter。不支持这些旧内部二进制入口，不要求保留其适配层或专用兼容测试；不得恢复已删除的 `getUnmappedClasspath(String)` 及其 accessor。Legacy fixture 对旧键集合、字符串 getter 或 JVM 入口的观察不建立公开产品合同，也不再成为这些内部入口的验收条件。此豁免只限上述内部边界，不适用于公开 API 或本节明确保留的 `FinalJarTasks` / protected `setupFiles` 等出口。
 
-原 internal Kotlin 函数也可能有外部 JVM 调用者；不能凭源码可见性就证明安全删除或改变 JVM owner/descriptor。必要旧签名可以单向适配到同一已组合结果；不得借适配重新注册、保留第二套逻辑或恢复旧总函数为内部主组织。内部 helper 名称、文件和无公开承诺的结果字段可以变化，但必须保留第 2 节形状语义；受影响可见入口的兼容性必须有针对性证据，保留布局不等于全库 ABI 已审计。
+内部必须保留 `GameShards<T>` 的 Joined/Split 与 typed `Part` 形状及投影语义；primary 仍独立惰性选择，形状与 primary 不匹配必须失败。既有任务名、目录、operation/type key 及属性协议使用的 `joined` / `common` / `client` 字符串值必须保持，不得随内部 typed 表示改成 enum 属性值或重命名输出；`legacyName` 等内部字段名可改。保留这些协议值不要求恢复旧 String getter、Map 构造或逐阶段 Map 往返。
+
+旧 internal Kotlin 函数在 JVM 可调用不再自动产生兼容保留义务；依赖上述已取消支持入口的外部 JVM 调用者不获兼容保证，但不能据此宣称没有受影响调用者。内部 helper 名称、文件和无公开承诺的结果字段可以变化，受影响公开入口及本节明确保留出口的兼容性仍须有针对性证据。不得为兼容重新注册、保留第二套逻辑或恢复旧总函数为内部主组织；保留布局不等于全库 ABI 已审计。
 
 runtime/run/Forge legacy 必须继续使用原 R、AW/extra 与平台辅助输入，不读取 clean/records。Mod outputs 沿原 runtime 项目/Mod ID 归属，不改用 compile 角色选择。项目产物仍走原 Jar → 按 namespace 选择 RemapJar/原 Jar → IncludeJar；include 保留原非传递解析、属性、collectors、includeTargets 监听及 manifest。发布 remap 解析仍为 raw compile/原项目 view 加原 AW/extra，不读取新的 clean SourceSet.compileClasspath。Fabric client Jar 原 main 注入、target.finalJar 的 client include 或 main include 选择，以及 Forge main include 保持。发布任务若原本依赖编译，仍可能随编译失败，不承诺绕过失败。
 
@@ -183,7 +185,7 @@ runtime/run/Forge legacy 必须继续使用原 R、AW/extra 与平台辅助输�
 | --- | --- |
 | G1：全局职责及单一注册真源 | 静态沿平台→家族→setupFiles→窄机制→消费/关系/出口核对输入权限、状态位置、无隐藏 target 导航及原位一次注册。核对 sources/sync/classifier 的独立变化面、Mixin 一致性边界、无总参数转发及与 Mixin 职责/图/V3 的同向关系。检查 Joined/Split 泛型纯数据跨阶段/任务投影、无容器行为或内部逐阶段 Map 往返，且未以类型存在替代阶段/producer 证明。静态图不能证明实际无环。 |
 | G2：平台供料、名字与版本惰性 | 对 Fabric split/included/未分割及 joined 的受影响接线比较原 task/configuration 名称、输出、Provider producer 与 namespace 分支；改变合法后配 loaderVersion 验证 joined 路径随原 Provider 更新。核对 primary/other 任务与角色的惰性映射、后配 primary/side/开关不改变注册数量/名称/路径规则；SERVER 保 Split 注册而有效 games/ops/records 只有 common，CLIENT 查找/编译 client→common 与 records common→client 分别验证。覆盖未分割 CLIENT+primary COMMON、独立 client:data 自身 preview AW/main runtime AW 和 Joined 单片，复用受影响 V3/V5。核对库仅原 R 一致性/继承与原 metadata/patches/mappings 位置，不以结果字段存在代替。 |
-| G3：身份、依赖与公开兼容 | 比较原 C/R/SourceSet 实例、完整成员及 artifact/component/所选 variant/classifier、项目输出角色、scope、原生产依赖和用户追加；分别核对完整 unmapped C/R 与角色 view，不要求逐 artifact 保序。检查 DSL 使用及受影响 JVM descriptor、FinalJarTasks 五字段/生成接口/getters、protected setupFiles 原合同与旧适配未重复注册；核对旧 `Provider<String>` 实际字符串值及合法/非法 Map 键集合、未知角色和形状/primary 不匹配失败，不能只看擦除签名或改 fixture 期望。完整 ABI 未覆盖须明示。Mixin 精确清理及身份路线复用 V2/V5/V7。 |
+| G3：身份、依赖与公开兼容 | 比较原 C/R/SourceSet 实例、完整成员及 artifact/component/所选 variant/classifier、项目输出角色、scope、原生产依赖和用户追加；分别核对完整 unmapped C/R 与角色 view，不要求逐 artifact 保序。检查 DSL 使用及受影响公开/明确保留出口的 JVM descriptor、FinalJarTasks 五字段/生成接口/getters、protected setupFiles 原合同与唯一生产链；核对 typed Part、形状/primary 不匹配失败，以及任务名、目录、operation/type key 和属性中的 joined/common/client 原字符串值。第 8 节已取消支持的旧 accessor、Info Map/String 和 preview adapter 不再要求旧 ABI/键集合/getter 的兼容测试，不以专用 Legacy fixture 恢复其保留义务；这不豁免其余行为检查。完整 ABI 未覆盖须明示。Mixin 精确清理及身份路线复用 V2/V5/V7。 |
 | G4：构造与监听时序 | 覆盖 secondary 已存在和迟到两条路径、重复 DSL action、includedClient/client 互斥及原失败点；观察 construct 返回前的库/metadata/继承和 listeners 登记，return→publish→listeners→action 次序、父库与公共接线顺序。不能只验证最终配置值相同。 |
 | G5：关系与策略 | 对 Linkage compile/runtime/include/outgoing、test 输出追加、data WITHOUT_DATA/资源及 Common static linkage 核对原关系；动态选择包含“独立 client 存在而缺 secondary”的 Common/run 不同回退，随后配置 secondary 再核对惰性参与关系。不新增具体 compilation，不顺带修 Common 环或 run TODO。 |
 | G6：四消费者首产、后配与实际消费 | 按 Mixin V1–V7 核对 Java/Kotlin、sources、stub、sync 各自实际文件/身份、完整 preparation 与必要生产；开启、关闭及解析前双向后配都需覆盖。尤其关闭冷启动仍保完整原生外部 producer/AW/remap，stub extra→primary；不安装私有 state，条件 operation 为空且不为取空列表读取本轮 operations。核对同组 preview 的游戏/sources/records 投影及独立 runtime，不能以句柄形状代替生产。缺输出/记录及无旧 workspace 的首次生产、新进程和 file/Maven 路线按 V7；不能预跑 operation、用缓存或对象投影掩盖依赖缺边。新增 preparation 的 Transform 参数隔离时机必须实测。 |
