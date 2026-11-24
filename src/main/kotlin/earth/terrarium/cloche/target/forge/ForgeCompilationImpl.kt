@@ -4,6 +4,8 @@ import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.ModDistribution
 import earth.terrarium.cloche.api.target.compilation.ForgeCompilation
 import earth.terrarium.cloche.util.withIdeaModule
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
 import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.compilation.TargetCompilationInfo
 import earth.terrarium.cloche.target.addCollectedDependencies
@@ -31,7 +33,9 @@ internal class ForgeCompilationInfo(
     name: String,
     target: ForgeLikeTargetImpl,
     intermediaryMinecraftClasspath: FileCollection,
-    namedMinecraftFile: Provider<RegularFile>,
+    namedGames: GameShards.Joined<Provider<RegularFile>>,
+    primaryGame: Provider<GamePart>,
+    preapplicationSide: Provider<String>,
     data: Boolean,
     test: Boolean,
     providerFactory: ProviderFactory,
@@ -39,13 +43,17 @@ internal class ForgeCompilationInfo(
     name,
     target,
     intermediaryMinecraftClasspath,
-    namedMinecraftFile,
+    namedGames,
+    primaryGame,
+    emptyMap(),
     providerFactory.provider { emptyList() },
     providerFactory.provider { ModDistribution.client },
     data,
     test,
     IncludeTransformationStateAttribute.None,
     JarJar::class.java,
+    target.project.files(),
+    preapplicationSide,
 )
 
 internal abstract class ForgeCompilationImpl @Inject constructor(info: ForgeCompilationInfo) : TargetCompilation<ForgeLikeTargetImpl>(info), ForgeCompilation {

@@ -14,10 +14,8 @@ import earth.terrarium.cloche.target.fabric.FabricTargetImpl
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.stubs.GenerateStubApi
 import org.gradle.api.Project
-import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.component.AdhocComponentWithVariants
 import org.gradle.api.file.FileCollection
-import org.gradle.api.file.RegularFile
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.provider.Provider
@@ -32,12 +30,11 @@ import org.jetbrains.kotlin.gradle.plugin.PLUGIN_CLASSPATH_CONFIGURATION_NAME
 private const val GENERATE_JAVA_EXPECT_STUBS_OPTION = "generateExpectStubs"
 
 private fun convertClasspath(
-    compilation: TargetCompilation<*>,
-    configurations: ConfigurationContainer,
+    consumption: CompilationConsumption,
     objects: ObjectFactory,
 ): Provider<List<GenerateStubApi.ResolvedArtifact>> {
     val minecraftFiles =
-        compilation.info.extraClasspathFiles.zip(compilation.finalMinecraftFile, List<RegularFile>::plus)
+        consumption.stubGames
             .map {
                 it.map {
                     val artifact = objects.newInstance<GenerateStubApi.ResolvedArtifact>()
@@ -48,7 +45,7 @@ private fun convertClasspath(
                 }
             }
 
-    val artifacts = getNonProjectArtifacts(configurations.named(compilation.sourceSet.compileClasspathConfigurationName)).flatMap { view ->
+    val artifacts = consumption.artifacts.flatMap { view ->
         view.artifacts.resolvedArtifacts.map { artifacts ->
             artifacts.map {
                 val artifact = objects.newInstance<GenerateStubApi.ResolvedArtifact>()
@@ -95,15 +92,15 @@ internal fun createCommonTarget(
             apiFileName.set(jarName.map { "$it-api-stub.jar" } )
 
             val objects = projectContext.objects
-            val configurations = projectContext.configurations
+            val consumptions = compilations.map { participants -> participants.map { it.compilationConsumption } }
 
-            val classpaths = compilations.flatMap {
+            val classpaths = consumptions.flatMap {
                 @Suppress("UNCHECKED_CAST")
                 val classpath =
                     objects.listProperty<List<GenerateStubApi.ResolvedArtifact>>()
 
-                for (compilation in it) {
-                    classpath.add(convertClasspath(compilation, configurations, objects))
+                for (consumption in it) {
+                    classpath.add(convertClasspath(consumption, objects))
                 }
 
                 classpath
@@ -111,14 +108,7 @@ internal fun createCommonTarget(
 
             this.classpaths.set(classpaths)
 
-            dependsOn(compilations.map { it.map { it.info.extraClasspathFiles } })
-            dependsOn(compilations.map { it.map { it.finalMinecraftFile } })
-
-            dependsOn(projectContext.files(compilations.map {
-                it.map {
-                    getRelevantSyncArtifacts(it.sourceSet.compileClasspathConfigurationName)
-                }
-            }))
+            dependsOn(consumptions.map { participants -> participants.map { it.preparation } })
         }
 
         return projectContext.fileTree(generateStub.flatMap(GenerateStubApi::outputDirectory)).builtBy(generateStub)

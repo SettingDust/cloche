@@ -1,0 +1,103 @@
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.compilation.TargetCompilationKt
+import groovy.json.JsonOutput
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// No target/Info/compilation is supplied to this registration boundary.
+def namedReads = 0
+def primaryReads = 0
+def namespaceReads = 0
+def commonProducer = tasks.register('produceAwCommon') { outputs.file(layout.buildDirectory.file('named/common.jar')) }
+def clientProducer = tasks.register('produceAwClient') { outputs.file(layout.buildDirectory.file('named/client.jar')) }
+def helpers = tasks.register('produceAwHelpers') { outputs.file(layout.buildDirectory.file('helpers.jar')) }
+def explicit = tasks.register('produceAwExplicit') { outputs.file(layout.buildDirectory.file('explicit.accesswidener')) }
+def external = tasks.register('produceAwExternal') { outputs.file(layout.buildDirectory.file('external.jar')) }
+def common = layout.file(commonProducer.map { namedReads++; it.outputs.files.singleFile })
+def client = layout.file(clientProducer.map { namedReads++; it.outputs.files.singleFile })
+def primary = objects.property(GamePart)
+primary.set(GamePart.COMMON)
+def selected = primary.map { primaryReads++; it }
+def namespace = objects.property(String)
+namespace.set('intermediary')
+def ns = namespace.map { namespaceReads++; it }
+def dir = layout.buildDirectory.dir('aw-boundary')
+def raw = files(external)
+def wideners = files(explicit)
+def remapHelpers = files(helpers)
+def named = new GameShards.Split(common, client)
+def result = TargetCompilationKt.registerMinecraftAccessWidening(project, 'probe', 'data', dir, providers.provider { false }, ns, named, selected, raw, wideners, remapHelpers)
+def joinedPrimary = objects.property(GamePart)
+joinedPrimary.set(GamePart.JOINED)
+def joined = TargetCompilationKt.registerMinecraftAccessWidening(project, 'joinedProbe', null, dir.map { it.dir('joined') }, providers.provider { false }, ns, new GameShards.Joined(common), joinedPrimary, raw, wideners, remapHelpers)
+assert namedReads == 0 && primaryReads == 0 && namespaceReads == 0
+assert result.awGames instanceof GameShards.Split
+assert joined.awGames instanceof GameShards.Joined
+assert tasks.withType(AccessWiden).names == ['accessWidenProbeDataMinecraft', 'accessWidenProbeDataOtherMinecraft', 'accessWidenJoinedProbeMinecraft'].toSet()
+
+def deps = { input -> files(input).buildDependencies.getDependencies(null)*.path.sort() }
+def invalid = { Closure action, String cause ->
+    try { action(); assert false : 'Expected mismatched primary failure' }
+    catch (Exception failure) {
+        def messages = []
+        for (Throwable e = failure; e != null; e = e.cause) messages.add(e.message)
+        assert messages.any { it?.contains(cause) } : messages
+    }
+}
+tasks.register('verifyAwBoundary') {
+    doLast {
+        def taskNames = tasks.withType(AccessWiden).names.toSet()
+        def p = result.primaryTask.get()
+        def other = result.otherTask.get()
+        assert !p.namedSource.get() && !other.namedSource.get()
+        assert p.namespace.get() == 'named' && other.namespace.get() == 'named'
+        def output = result.awGames
+        def rows = []
+        for (part in [GamePart.COMMON, GamePart.CLIENT]) {
+            primary.set(part)
+            def mainInput = part == GamePart.COMMON ? common : client
+            def otherInput = part == GamePart.COMMON ? client : common
+            assert p.inputFile.get() == mainInput.get()
+            assert other.inputFile.get() == otherInput.get()
+            assert p.outputFile.get().asFile == dir.get().file(mainInput.get().asFile.name).asFile
+            assert other.outputFile.get().asFile == dir.get().dir('other').file(otherInput.get().asFile.name).asFile
+            assert output.common.get() == (part == GamePart.COMMON ? p : other).outputFile.get()
+            assert output.client.get() == (part == GamePart.CLIENT ? p : other).outputFile.get()
+            assert deps(output.common) == [(part == GamePart.COMMON ? p : other).path]
+            assert deps(output.client) == [(part == GamePart.CLIENT ? p : other).path]
+            assert deps(p.inputFile) == [(part == GamePart.COMMON ? commonProducer : clientProducer).get().path]
+            assert deps(other.inputFile) == [(part == GamePart.CLIENT ? commonProducer : clientProducer).get().path]
+            assert p.taskDependencies.getDependencies(p)*.path.containsAll([helpers.get().path, external.get().path, explicit.get().path, (part == GamePart.COMMON ? commonProducer : clientProducer).get().path])
+            assert tasks.withType(AccessWiden).names.toSet() == taskNames
+            rows.add([primary:part.name(), input:p.inputFile.get().asFile.path, other:other.inputFile.get().asFile.path,
+                common:output.common.get().asFile.path, client:output.client.get().asFile.path,
+                commonProducer:deps(output.common), clientProducer:deps(output.client)])
+        }
+        namespace.set('')
+        assert !p.taskDependencies.getDependencies(p).contains(helpers.get())
+        assert p.taskDependencies.getDependencies(p).containsAll([external.get(), explicit.get(), clientProducer.get()])
+        namespace.set('intermediary')
+        assert p.taskDependencies.getDependencies(p).contains(helpers.get())
+        assert joined.otherTask == null
+        assert joined.awGames.value.get() == joined.primaryTask.get().outputFile.get()
+        assert deps(joined.awGames.value) == [joined.primaryTask.get().path]
+        primary.set(GamePart.JOINED)
+        invalid({ p.inputFile.get() }, 'Split Minecraft cannot select JOINED')
+        invalid({ other.inputFile.get() }, 'Split Minecraft cannot select JOINED')
+        invalid({ output.common.get() }, 'Split Minecraft cannot select JOINED')
+        invalid({ output.client.get() }, 'Split Minecraft cannot select JOINED')
+        joinedPrimary.set(GamePart.CLIENT)
+        invalid({ joined.awGames.value.get() }, 'Joined Minecraft cannot select CLIENT')
+        joinedPrimary.set(GamePart.COMMON)
+        invalid({ joined.primaryTask.get().inputFile.get() }, 'Joined Minecraft cannot select COMMON')
+        assert tasks.withType(AccessWiden).names.toSet() == taskNames
+        file('aw-boundary-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([roles:rows,tasks:taskNames.sort(), namespaceConditional:true, invalidSelectionsRejected:true]))
+        println 'VERIFIED_AW_BOUNDARY_LAZY_ROLES_IDENTITIES_PRODUCERS_NAMESPACE_FAILURES'
+    }
+}

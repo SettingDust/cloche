@@ -1,0 +1,117 @@
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// Reuse the shared real-game fixture; request only sources, never a source compiler.
+def target = cloche.singleTarget { c -> c.fabric { } }
+def compilation = target.main
+def decompile = tasks.named('decompileMinecraft', Decompile)
+def operation = tasks.named('preapplyCommonMixins', Mixin)
+def operations = { compilation.preapplyMixinsTasks.get()*.get() }
+def C = configurations.named('compileClasspath')
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+configurations.named('clientMinecraftLibraries') {
+    dependencies.add(project.dependencies.create(project.files('input/client-library.jar')))
+}
+def entries = { File f ->
+    new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name): z.getInputStream(e).bytes] } }
+}
+def deps = { files -> files.buildDependencies.getDependencies(null)*.path.sort() }
+if (providers.gradleProperty('r2Fault').isPresent()) afterEvaluate {
+    operation.configure { sourceNamespace.set('r2_missing_namespace') }
+}
+
+decompile.configure {
+    def inputProducers = deps(project.files(inputFile))
+    assert inputProducers.contains(operation.get().path) == target.mixinPreapplication.get()
+    doFirst {
+        def enabled = target.mixinPreapplication.get()
+        def input = inputFile.get().asFile
+        def libraries = classpath.files
+        def games = compilation.compileMinecraftFiles.get()*.asFile
+        assert input == games.last()
+        def originalLibraries = enabled ? compilation.info.preapplicationLibraries.files : []
+        assert libraries == (C.get().files + (games - input) + originalLibraries).toSet()
+        assert libraries.contains(file('input/client-library.jar')) == enabled
+        assert entries(file('input/client-library.jar')).containsKey('library/ClientSupport.class')
+        assert deps(project.files(compilation.sources)) == [path]
+        def observation = [enabled:enabled, input:input.absolutePath, classpath:libraries*.absolutePath.sort(),
+            originalLibraries:originalLibraries*.absolutePath, sources:compilation.sources.get().asFile.absolutePath, sourcesDeps:deps(project.files(compilation.sources)),
+            inputProducersBeforeExecution:inputProducers, inputDepsAtExecution:deps(project.files(inputFile)), classpathDepsAtExecution:deps(classpath), Cdeps:deps(C.get()),
+            graph:gradle.taskGraph.allTasks*.path, state:C.get().attributes.getAttribute(state)]
+        if (enabled) {
+            assert operations().every { it.appliedMixins.get().asFile.isFile() && it.outputFile.get().asFile.isFile() }
+            assert !libraries.contains(compilation.finalMinecraftFile.get().asFile)
+            assert compilation.runtimeExtraClasspathFiles.get().every { !libraries.contains(it.asFile) }
+            def artifacts = C.get().incoming.artifacts.artifacts
+            def raw = C.get().incoming.artifactView {
+                componentFilter { !(it instanceof ProjectComponentIdentifier) }
+                attributes.attribute(state, 'raw')
+            }.artifacts.artifacts
+            observation.cleanSources = []
+            operation.get().mixinFiles.each { source ->
+                def original = raw.find { it.file == source }
+                def clean = matchCleanArtifact(original, artifacts).file
+                assert libraries.contains(clean)
+                assert clean != source
+                def configName = source.name.split('-1')[0] + '.json'
+                def before = entries(source)
+                def after = entries(clean)
+                def json = new JsonSlurper().parseText(new String(after[configName], 'UTF-8'))
+                assert json.mixins == []
+                assert (json.client ?: []) == []
+                if (configName == 'ref.json') assert json.server == ['Unapplied']
+                assert before.keySet() == after.keySet()
+                before.each { name, bytes -> if (name != configName) assert Arrays.equals(bytes, after[name]) : name }
+                observation.cleanSources.add([raw:source.absolutePath, clean:clean.absolutePath, config:json])
+            }
+            assert observation.cleanSources.size() == 3
+            def game = entries(input)
+            assert game.containsKey('named/Game.class') && !game.containsKey('named/ClientGame.class')
+            assert compilation.compileMinecraftFiles.get().any { it.asFile != input && entries(it.asFile).containsKey('named/ClientGame.class') }
+            observation.operations = operations().collect { [task:it.path, notification:it.appliedMixins.get().asFile.absolutePath, record:it.appliedMixins.get().asFile.text] }
+            assert new JsonSlurper().parseText(new String(game['ref.json'], 'UTF-8')).mixins == ['Unapplied']
+            observation.notification = operation.get().appliedMixins.get().asFile.absolutePath
+            observation.notificationText = operation.get().appliedMixins.get().asFile.text
+            println 'R2_NOTIFICATION_READY ' + observation.notification
+        } else {
+            assert input == compilation.finalMinecraftFile.get().asFile
+            assert libraries == (configurations.named('originalCompileBaseline').get().files + compilation.runtimeExtraClasspathFiles.get()*.asFile).toSet()
+            assert C.get().attributes.getAttribute(state) == null
+            assert !gradle.taskGraph.allTasks.any { it instanceof Mixin || it.name.startsWith('join') }
+            assert !operation.get().appliedMixins.get().asFile.exists()
+        }
+        file('decompile-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+        println 'R2_DECOMPILE_INPUT_READY'
+    }
+}
+tasks.register('verifySources') {
+    // Exercise the actual public sources Provider and its producer, rather than naming Decompile.
+    inputs.file(compilation.sources)
+    doLast {
+        def sourceJar = compilation.sources.get().asFile
+        def contents = entries(sourceJar)
+        def game = new String(contents['named/Game.java'], 'UTF-8')
+        if (target.mixinPreapplication.get()) {
+            assert !contents.containsKey('named/ClientGame.java')
+            assert game.contains('Ref') && game.contains('Plain') : game
+            assert game.contains('implements')
+            assert contents.containsKey('shared/Duplicate.java')
+        } else {
+            assert !game.contains('implements Ref') && !game.contains('implements Plain') : game
+            assert !contents.containsKey('named/ClientGame.java')
+        }
+        file('sources-contents.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(contents.findAll { name, bytes -> name.endsWith('.java') }.collectEntries { name, bytes -> [(name):new String(bytes, 'UTF-8')] }))
+        println 'VERIFIED_SOURCES ' + providers.gradleProperty('scenario').getOrElse('on') + ' ' + sourceJar
+    }
+}

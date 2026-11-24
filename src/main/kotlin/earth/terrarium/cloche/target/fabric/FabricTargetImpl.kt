@@ -1,6 +1,12 @@
 package earth.terrarium.cloche.target.fabric
 
 import earth.terrarium.cloche.ClochePlugin
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.Directory
+import org.gradle.api.artifacts.Configuration
+import org.gradle.api.Project
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
 import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.FabricTarget
 import earth.terrarium.cloche.api.target.compilation.FabricIncludedClient
@@ -11,7 +17,6 @@ import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.target.compilation.compilationSourceSet
 import earth.terrarium.cloche.target.lazyConfigurable
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
-import earth.terrarium.cloche.target.compilation.registerCompilationTransformations
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
 import earth.terrarium.cloche.util.fromJars
 import kotlinx.serialization.json.JsonNull
@@ -40,6 +45,7 @@ import net.msrandom.minecraftcodev.runs.task.WriteClasspathFile
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserCodeException
 import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.SourceSet
@@ -64,200 +70,17 @@ import kotlin.io.path.outputStream
 internal abstract class FabricTargetImpl @Inject constructor(name: String) :
     MinecraftTargetInternal(name),
     FabricTarget {
-    private val commonLibrariesConfiguration =
-        project.configurations.create(lowerCamelCaseGradleName(featureName, "commonMinecraftLibraries")) {
-            isCanBeConsumed = false
-
-            attributes.attribute(MinecraftOperatingSystemAttribute.attribute, project.objects.named(operatingSystemName()))
-        }
-
-    private val clientLibrariesConfiguration =
-        project.configurations.create(lowerCamelCaseGradleName(featureName, "clientMinecraftLibraries")) {
-            isCanBeConsumed = false
-
-            attributes.attribute(MinecraftOperatingSystemAttribute.attribute, project.objects.named(operatingSystemName()))
-        }
-
-    private val resolveCommonMinecraft =
-        project.tasks.register<ResolveMinecraftCommon>(
-            lowerCamelCaseGradleName("resolve", name, "common"),
-        ) {
-            group = "minecraft-resolution"
-
-            minecraftVersion.set(this@FabricTargetImpl.minecraftVersion)
-
-            output.set(minecraftRemapNamespace.flatMap {
-                if (it.isEmpty()) {
-                    output()
-                } else {
-                    output("obf")
-                }
-            })
-        }
-
-    private val resolveClientMinecraft =
-        project.tasks.register<ResolveMinecraftClient>(
-            lowerCamelCaseGradleName("resolve", name, "client"),
-        ) {
-            group = "minecraft-resolution"
-
-            minecraftVersion.set(this@FabricTargetImpl.minecraftVersion)
-
-            output.set(minecraftRemapNamespace.flatMap {
-                if (it.isEmpty()) {
-                    output("client")
-                } else {
-                    output("client-obf")
-                }
-            })
-        }
-
-    private val remapCommonMinecraftIntermediary =
-        project.tasks.register<RemapTask>(
-            lowerCamelCaseGradleName(
-                "remap",
-                name,
-                "commonMinecraft",
-                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE,
-            ),
-        ) {
-            group = "minecraft-transforms"
-
-            inputFile.set(resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output))
-            sourceNamespace.set("obf")
-            targetNamespace.set(minecraftRemapNamespace)
-
-            classpath.from(commonLibrariesConfiguration)
-
-            mappings.set(loadMappingsTask.flatMap(LoadMappings::output))
-
-            outputFile.set(output(MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE))
-        }
-
-    private val remapClientMinecraftIntermediary =
-        project.tasks.register<RemapTask>(
-            lowerCamelCaseGradleName(
-                "remap",
-                name,
-                "clientMinecraft",
-                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE,
-            ),
-        ) {
-            group = "minecraft-transforms"
-
-            inputFile.set(resolveClientMinecraft.flatMap(ResolveMinecraftClient::output))
-            sourceNamespace.set("obf")
-            targetNamespace.set(minecraftRemapNamespace)
-
-            classpath.from(commonLibrariesConfiguration)
-            classpath.from(clientLibrariesConfiguration)
-            classpath.from(resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output))
-
-            mappings.set(loadMappingsTask.flatMap(LoadMappings::output))
-
-            outputFile.set(output("client-${MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE}"))
-        }
-
-    private val remapCommon = project.tasks.register<RemapTask>(
-        lowerCamelCaseGradleName("remap", featureName, "commonMinecraftNamed"),
-    ) {
-        group = "minecraft-transforms"
-
-        inputFile.set(remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile))
-
-        classpath.from(commonLibrariesConfiguration)
-
-        mappings.set(loadMappingsTask.flatMap(LoadMappings::output))
-
-        sourceNamespace.set(minecraftRemapNamespace)
-
-        outputFile.set(output(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE))
-    }
-
-    private val remapClient = project.tasks.register<RemapTask>(
-        lowerCamelCaseGradleName("remap", featureName, "clientMinecraftNamed"),
-    ) {
-        group = "minecraft-transforms"
-
-        inputFile.set(remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile))
-
-        classpath.from(commonLibrariesConfiguration)
-        classpath.from(clientLibrariesConfiguration)
-        classpath.from(remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile))
-
-        mappings.set(loadMappingsTask.flatMap(LoadMappings::output))
-
-        sourceNamespace.set(minecraftRemapNamespace)
-
-        outputFile.set(output("client-${MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE}"))
-    }
-
-    private val generateMappingsArtifact = project.tasks.register<Zip>(
-        lowerCamelCaseGradleName("generate", featureName, "mappingsArtifact"),
-    ) {
-        destinationDirectory.set(temporaryDir)
-        archiveBaseName.set(listOfNotNull(featureName, "mappings").joinToString("-"))
-        archiveVersion.set(null as String?)
-
-        val fileList = minecraftRemapNamespace.map {
-            if (it.isEmpty()) {
-                emptyList()
-            } else {
-                listOf(loadMappingsTask.flatMap(LoadMappings::output))
-            }
-        }
-
-        from(fileList) {
-            into("mappings")
-        }
-    }
-
-    val writeRemapClasspathTask: TaskProvider<WriteClasspathFile> = project.tasks.register<WriteClasspathFile>(
-        lowerCamelCaseGradleName("write", featureName, "remapClasspath"),
-    ) {
-        val classpaths = minecraftRemapNamespace.map {
-            if (it.isEmpty()) {
-                emptyList()
-            } else {
-                listOf(
-                    commonLibrariesConfiguration,
-                    clientLibrariesConfiguration,
-                    remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
-                )
-            }
-        }
-
-        classpath.from(classpaths)
-        separator.set(File.pathSeparator)
-    }
-
-    private val commonJar = minecraftRemapNamespace.flatMap {
-        if (it.isEmpty()) {
-            resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
-        } else {
-            remapCommon.flatMap(RemapTask::outputFile)
-        }
-    }
-
-    private val clientJar = minecraftRemapNamespace.flatMap {
-        if (it.isEmpty()) {
-            resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
-        } else {
-            remapClient.flatMap(RemapTask::outputFile)
-        }
-    }
-
-    private val intermediaryClasspath = project.files(minecraftRemapNamespace.map {
-        if (it.isEmpty()) {
-            emptyList()
-        } else {
-            // TODO Once client splitting is done, we might not always need the client Jar
-            listOf(
-                remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
-                remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile),
-            )
-        }
-    })
+    private val game = registerFabricGame(
+        project, name, featureName, minecraftVersion, minecraftRemapNamespace, outputDirectory,
+        loadMappingsTask.flatMap(LoadMappings::output),
+    )
+    private val commonLibrariesConfiguration = game.commonLibraries
+    private val clientLibrariesConfiguration = game.clientLibraries
+    private val intermediaryClasspath = game.intermediary
+    private val commonJar = game.named.common
+    private val generateMappingsArtifact = game.mappingsArtifact
+    val writeRemapClasspathTask: TaskProvider<WriteClasspathFile> = game.remapClasspath
+    internal val preapplicationClientLibraries get() = project.files(commonLibrariesConfiguration, clientLibrariesConfiguration)
 
     override val finalJar: Provider<out Jar>
         get() = client.value.flatMap {
@@ -277,12 +100,14 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
                     ClochePlugin.CLIENT_COMPILATION_NAME,
                     this,
                     intermediaryClasspath,
-                    commonJar,
-                    clientJar,
-                    main.finalMinecraftFile,
+                    game.named,
+                    emptyMap(),
+                    project.objects.listProperty(RegularFile::class.java).apply { add(main.finalMinecraftFile) },
                     data = false,
                     test = false,
-                    client = providerFactory.provider { true },
+                    primaryGame = providerFactory.provider { GamePart.CLIENT },
+                    preapplicationSide = providerFactory.provider { "CLIENT" },
+                    preapplicationLibraries = preapplicationClientLibraries,
                 ),
             )
 
@@ -449,45 +274,22 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         }
     }
 
-    private fun output(suffix: String? = null) = outputDirectory.zip(minecraftVersion) { dir, version ->
-        dir.file(buildString {
-            append("minecraft-$version")
-
-            if (suffix != null) {
-                append("-$suffix")
-            }
-
-            append(".jar")
-        })
-    }
-
-    private fun registerCommonCompilation(name: String): FabricCompilationImpl {
-        val commonTask = registerCompilationTransformations(
-            this,
-            lowerCamelCaseGradleName(name.takeUnless(SourceSet.MAIN_SOURCE_SET_NAME::equals), "common"),
-            project.compilationSourceSet(this, name),
-            commonJar,
-            project.provider { emptyList() },
-        ).accessWidenTask
-
-        commonTask.configure {
-            accessWideners.from(this@FabricTargetImpl.accessWideners)
-        }
-
-        return project.objects.newInstance<FabricCompilationImpl>(
+    private fun registerCommonCompilation(name: String): FabricCompilationImpl =
+        project.objects.newInstance<FabricCompilationImpl>(
             FabricCompilationInfo(
                 name,
                 this,
                 intermediaryClasspath,
-                commonJar,
-                clientJar,
-                commonTask.flatMap(AccessWiden::outputFile),
+                game.named,
+                mapOf("common" to commonJar),
+                providerFactory.provider { emptyList() },
                 name == ClochePlugin.DATA_COMPILATION_NAME,
                 name == SourceSet.TEST_SOURCE_SET_NAME,
-                includedClient.isConfigured,
+                includedClient.isConfigured.map { if (it) GamePart.CLIENT else GamePart.COMMON },
+                providerFactory.provider { hasSeparateClient }.flatMap { it }.map { if (it) "SERVER" else "CLIENT" },
+                preapplicationClientLibraries,
             ),
         )
-    }
 
     override fun registerAccessWidenerMergeTask(compilation: CompilationInternal) {
         if (compilation.isTest) {
@@ -579,7 +381,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
             )
 
             val inMapFileArgument = loadMappingsTask.flatMap(LoadMappings::output).map {
-                "-A$inMapFile=${it}"
+                "-A$inMapFile=$it"
             }
 
             options.compilerArgumentProviders.add(CommandLineArgumentProvider {
@@ -596,4 +398,247 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
     }
 
     override fun withMetadataJson(action: Action<MetadataFileProvider<JsonObject>>) = main.withMetadataJson(action)
+}
+
+internal data class FabricGame(
+    val named: GameShards.Split<Provider<RegularFile>>,
+    val intermediary: FileCollection,
+    val commonLibraries: Configuration,
+    val clientLibraries: Configuration,
+    val mappingsArtifact: TaskProvider<Zip>,
+    val remapClasspath: TaskProvider<WriteClasspathFile>,
+)
+
+internal fun registerFabricGame(
+    project: Project,
+    name: String,
+    featureName: String?,
+    minecraftVersion: Provider<String>,
+    minecraftRemapNamespace: Provider<String>,
+    outputDirectory: Provider<Directory>,
+    mappingFile: Provider<RegularFile>,
+): FabricGame {
+    fun output(suffix: String? = null) =
+        outputDirectory.zip(minecraftVersion) { dir, version ->
+            dir.file("minecraft-$version" + (suffix?.let { "-$it" } ?: "") + ".jar")
+        }
+
+    val commonLibrariesConfiguration =
+        project.configurations.create(lowerCamelCaseGradleName(featureName, "commonMinecraftLibraries")) {
+            isCanBeConsumed = false
+
+            attributes.attribute(MinecraftOperatingSystemAttribute.attribute, project.objects.named(operatingSystemName()))
+        }
+
+    val clientLibrariesConfiguration =
+        project.configurations.create(lowerCamelCaseGradleName(featureName, "clientMinecraftLibraries")) {
+            isCanBeConsumed = false
+
+            attributes.attribute(MinecraftOperatingSystemAttribute.attribute, project.objects.named(operatingSystemName()))
+        }
+
+    val resolveCommonMinecraft =
+        project.tasks.register<ResolveMinecraftCommon>(
+            lowerCamelCaseGradleName("resolve", name, "common"),
+        ) {
+            group = "minecraft-resolution"
+
+            this.minecraftVersion.set(minecraftVersion)
+
+            output.set(
+                minecraftRemapNamespace.flatMap {
+                    if (it.isEmpty()) {
+                        output()
+                    } else {
+                        output("obf")
+                    }
+                },
+            )
+        }
+
+    val resolveClientMinecraft =
+        project.tasks.register<ResolveMinecraftClient>(
+            lowerCamelCaseGradleName("resolve", name, "client"),
+        ) {
+            group = "minecraft-resolution"
+
+            this.minecraftVersion.set(minecraftVersion)
+
+            output.set(
+                minecraftRemapNamespace.flatMap {
+                    if (it.isEmpty()) {
+                        output("client")
+                    } else {
+                        output("client-obf")
+                    }
+                },
+            )
+        }
+
+    val remapCommonMinecraftIntermediary =
+        project.tasks.register<RemapTask>(
+            lowerCamelCaseGradleName(
+                "remap",
+                name,
+                "commonMinecraft",
+                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE,
+            ),
+        ) {
+            group = "minecraft-transforms"
+
+            inputFile.set(resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output))
+            sourceNamespace.set("obf")
+            targetNamespace.set(minecraftRemapNamespace)
+
+            classpath.from(commonLibrariesConfiguration)
+
+            mappings.set(mappingFile)
+
+            outputFile.set(output(MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE))
+        }
+
+    val remapClientMinecraftIntermediary =
+        project.tasks.register<RemapTask>(
+            lowerCamelCaseGradleName(
+                "remap",
+                name,
+                "clientMinecraft",
+                MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE,
+            ),
+        ) {
+            group = "minecraft-transforms"
+
+            inputFile.set(resolveClientMinecraft.flatMap(ResolveMinecraftClient::output))
+            sourceNamespace.set("obf")
+            targetNamespace.set(minecraftRemapNamespace)
+
+            classpath.from(commonLibrariesConfiguration)
+            classpath.from(clientLibrariesConfiguration)
+            classpath.from(resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output))
+
+            mappings.set(mappingFile)
+
+            outputFile.set(output("client-${MinecraftCodevFabricPlugin.INTERMEDIARY_MAPPINGS_NAMESPACE}"))
+        }
+
+    val remapCommon =
+        project.tasks.register<RemapTask>(
+            lowerCamelCaseGradleName("remap", featureName, "commonMinecraftNamed"),
+        ) {
+            group = "minecraft-transforms"
+
+            inputFile.set(remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile))
+
+            classpath.from(commonLibrariesConfiguration)
+
+            mappings.set(mappingFile)
+
+            sourceNamespace.set(minecraftRemapNamespace)
+
+            outputFile.set(output(MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE))
+        }
+
+    val remapClient =
+        project.tasks.register<RemapTask>(
+            lowerCamelCaseGradleName("remap", featureName, "clientMinecraftNamed"),
+        ) {
+            group = "minecraft-transforms"
+
+            inputFile.set(remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile))
+
+            classpath.from(commonLibrariesConfiguration)
+            classpath.from(clientLibrariesConfiguration)
+            classpath.from(remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile))
+
+            mappings.set(mappingFile)
+
+            sourceNamespace.set(minecraftRemapNamespace)
+
+            outputFile.set(output("client-${MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE}"))
+        }
+
+    val generateMappingsArtifact =
+        project.tasks.register<Zip>(
+            lowerCamelCaseGradleName("generate", featureName, "mappingsArtifact"),
+        ) {
+            destinationDirectory.set(temporaryDir)
+            archiveBaseName.set(listOfNotNull(featureName, "mappings").joinToString("-"))
+            archiveVersion.set(null as String?)
+
+            val fileList =
+                minecraftRemapNamespace.map {
+                    if (it.isEmpty()) {
+                        emptyList()
+                    } else {
+                        listOf(mappingFile)
+                    }
+                }
+
+            from(fileList) {
+                into("mappings")
+            }
+        }
+
+    val writeRemapClasspathTask: TaskProvider<WriteClasspathFile> =
+        project.tasks.register<WriteClasspathFile>(
+            lowerCamelCaseGradleName("write", featureName, "remapClasspath"),
+        ) {
+            val classpaths =
+                minecraftRemapNamespace.map {
+                    if (it.isEmpty()) {
+                        emptyList()
+                    } else {
+                        listOf(
+                            commonLibrariesConfiguration,
+                            clientLibrariesConfiguration,
+                            remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                        )
+                    }
+                }
+
+            classpath.from(classpaths)
+            separator.set(File.pathSeparator)
+        }
+
+    val commonJar =
+        minecraftRemapNamespace.flatMap {
+            if (it.isEmpty()) {
+                resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
+            } else {
+                remapCommon.flatMap(RemapTask::outputFile)
+            }
+        }
+
+    val clientJar =
+        minecraftRemapNamespace.flatMap {
+            if (it.isEmpty()) {
+                resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
+            } else {
+                remapClient.flatMap(RemapTask::outputFile)
+            }
+        }
+
+    val intermediaryClasspath =
+        project.files(
+            minecraftRemapNamespace.map {
+                if (it.isEmpty()) {
+                    emptyList()
+                } else {
+                    // TODO Once client splitting is done, we might not always need the client Jar
+                    listOf(
+                        remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                        remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile),
+                    )
+                }
+            },
+        )
+
+    return FabricGame(
+        GameShards.Split(commonJar, clientJar),
+        intermediaryClasspath,
+        commonLibrariesConfiguration,
+        clientLibrariesConfiguration,
+        generateMappingsArtifact,
+        writeRemapClasspathTask,
+    )
 }

@@ -1,0 +1,130 @@
+import earth.terrarium.cloche.target.compilation.GameShards
+import groovy.json.JsonOutput
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.tasks.compile.JavaCompile
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+def target = cloche.singleTarget { it.fabric { } }
+def c = target.main
+def getter = { String prefix -> c.class.methods.find { it.name.startsWith(prefix) }.invoke(c) }
+def consumption = getter('getCompilationConsumption$')
+def preview = getter('getMixinPreview$')
+assert consumption.games.is(c.compileMinecraftFiles)
+def names = tasks.names.toSet()
+def sourceTask = tasks.named('decompileMinecraft', Decompile)
+// These handles are captured before the final on/off decision, as are the real Java/Kotlin actions.
+def sourceDependencies = sourceTask.get().taskDependencies
+def javaDependencies = tasks.named('compileJava', JavaCompile).get().taskDependencies
+def kotlinDependencies = tasks.named('compileKotlin', KotlinCompile).get().taskDependencies
+def enabled = providers.gradleProperty('composeEnabled').map { it.toBoolean() }.getOrElse(true)
+target.mixinPreapplication.set(!enabled)
+target.mixinPreapplication.set(enabled)
+assert tasks.names.toSet() == names
+
+// A native ordinary file dependency, independent of Mixin classification and remapping.
+def nativeLibrary = tasks.register('produceComposeLibrary', Jar) {
+    from('input/auxiliary.txt')
+    destinationDirectory.set(layout.buildDirectory.dir('compose-native'))
+    archiveFileName.set('native.jar')
+    doFirst {
+        if (providers.gradleProperty('composeFault').getOrElse('') == 'native') throw new GradleException('compose_native_failure')
+    }
+    doLast { println 'COMPOSE_NATIVE_PRODUCED' }
+}
+c.dependencies { it.implementation.add(files(nativeLibrary.flatMap { it.archiveFile })) }
+def fault = providers.gradleProperty('composeFault').getOrElse('')
+tasks.withType(Mixin).configureEach {
+    if (fault == 'record') {
+        outputs.upToDateWhen { false }
+        doLast { appliedMixins.get().asFile.text = '{broken composed record' }
+    }
+}
+def requireReady = {
+    assert nativeLibrary.get().state.executed
+    def operations = c.preapplyMixinsTasks.get()
+    def preparationTasks = consumption.preparation.buildDependencies.getDependencies(null)
+    assert preparationTasks.contains(nativeLibrary.get())
+    if (enabled) {
+        assert operations.every { it.get().state.executed }
+        assert preparationTasks.containsAll(operations*.get())
+        assert preview.records.get()*.asFile.every { it.isFile() }
+        assert c.compileMinecraftFiles.get() == [preview.strippedGames.client.get(), preview.strippedGames.common.get()]
+        assert consumption.stubGames.get() == c.compileMinecraftFiles.get()
+    } else {
+        assert consumption.stubGames.get() == c.runtimeExtraClasspathFiles.get() + c.finalMinecraftFile.get()
+        assert !gradle.taskGraph.allTasks.any { it instanceof Mixin }
+        assert c.compileMinecraftFiles.get() == [c.finalMinecraftFile.get()]
+    }
+    assert (c.compileConfiguration.get().attributes.getAttribute(Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)) != null) == enabled
+    println 'COMPOSE_PREPARATION_READY'
+}
+def consumer = providers.gradleProperty('composeConsumer').get()
+if (consumer in ['configuration', 'view']) {
+    sourceSets.main.java.setSrcDirs([])
+    sourceSets.main.kotlin.setSrcDirs([])
+}
+def C = c.compileConfiguration
+// No game input or unrelated aggregate consumer is attached to these standalone materializations.
+def filesToResolve = consumer == 'configuration' ? files(C.map { it.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files }) : files(consumption.artifacts.map { it.files })
+tasks.register('verifyComposedConfiguration') {
+    dependsOn consumption.preparation
+    inputs.files(filesToResolve)
+    doLast {
+        requireReady()
+        def resolved = filesToResolve.files
+        assert resolved.contains(nativeLibrary.get().archiveFile.get().asFile)
+        assert !gradle.taskGraph.allTasks.any { it.path in [':compileJava', ':compileKotlin', ':decompileMinecraft'] }
+        println "VERIFIED_COMPOSED_$consumer"
+    }
+}
+for (taskName in ['compileJava', 'compileKotlin', 'decompileMinecraft']) {
+    tasks.named(taskName) {
+        doFirst {
+            requireReady()
+            println "COMPOSE_CONSUMER_READY $path"
+        }
+    }
+}
+tasks.register('verifyComposedConsumer') {
+    if (consumer in ['configuration', 'view']) dependsOn 'verifyComposedConfiguration'
+    if (consumer == 'java') dependsOn 'compileJava'
+    if (consumer == 'kotlin') dependsOn 'compileKotlin'
+    if (consumer == 'sources') inputs.files(c.sources)
+    doLast {
+        requireReady()
+        if (consumer == 'java') assert file('build/classes/java/main/Consume.class').isFile()
+        if (consumer == 'kotlin') assert file('build/classes/kotlin/main/ConsumeKotlinKt.class').isFile()
+        if (consumer == 'sources') {
+            assert !gradle.taskGraph.allTasks.any { it.path in [':compileJava', ':compileKotlin'] }
+            new ZipFile(c.sources.get().asFile).withCloseable { z ->
+                def entry = z.getEntry('named/Game.java')
+                assert entry != null
+                def source = z.getInputStream(entry).text
+                if (enabled) assert source.contains('implements') && source.contains('Ref')
+            }
+            assert sourceTask.get().classpath.files.contains(nativeLibrary.get().archiveFile.get().asFile)
+        }
+        def recordFiles = enabled ? preview.records.get()*.asFile : []
+        def rows = [consumer:consumer, enabled:enabled, graph:gradle.taskGraph.allTasks*.path,
+            preparation:consumption.preparation.buildDependencies.getDependencies(null)*.path.sort(),
+            javaPreparation:javaDependencies.getDependencies(tasks.named('compileJava').get())*.path.sort(),
+            kotlinPreparation:kotlinDependencies.getDependencies(tasks.named('compileKotlin').get())*.path.sort(),
+            sourcesPreparation:sourceDependencies.getDependencies(sourceTask.get())*.path.sort(),
+            games:c.compileMinecraftFiles.get()*.asFile*.path, records:recordFiles*.path]
+        assert rows.javaPreparation.containsAll(rows.preparation)
+        assert rows.kotlinPreparation.containsAll(rows.preparation)
+        assert rows.sourcesPreparation.containsAll(rows.preparation)
+        file('compose-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(rows))
+        println "VERIFIED_COMPOSED_CONSUMPTION $consumer $enabled"
+    }
+}

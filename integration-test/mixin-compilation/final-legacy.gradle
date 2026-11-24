@@ -1,0 +1,29 @@
+// Applied after the original sides fixture; assertions inspect the real Forge task's configured Provider owners.
+import earth.terrarium.cloche.target.forge.lex.ForgeTargetImpl
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+def observations=[]
+def forge = cloche.targets.getByName('joined')
+tasks.register('verifyR5Legacy') {
+    if (!providers.gradleProperty('r5ForgeOff').isPresent()) dependsOn 'verifySides'
+    doLast {
+        [forge.main,forge.data.value.get(),forge.getTest().value.get()].each { c ->
+            assert c.target instanceof ForgeTargetImpl
+            def legacy = c.class.methods.find { it.name.startsWith('getWriteLegacyClasspath') }.invoke(c).get()
+            assert legacy.classpath.files.contains(c.finalMinecraftFile.get().asFile)
+            def origin = project.files(c.finalMinecraftFile).buildDependencies.getDependencies(null)*.path
+            def operation = c.preapplyMixinsTasks.get().first().get().path
+            assert !origin.contains(operation)
+            observations.add([compilation:c.name,task:legacy.path,inputOwners:legacy.classpath.from*.toString(),
+                finalGameOwners:origin,operation:operation,enabled:c.target.mixinPreapplication.get()])
+        }
+        file('r5-legacy.json').text=JsonOutput.prettyPrint(JsonOutput.toJson(observations))
+        println 'VERIFIED_R5_LEGACY_PROVIDER ' + observations.size()
+    }
+}

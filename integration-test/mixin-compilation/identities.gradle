@@ -1,0 +1,136 @@
+import earth.terrarium.cloche.ClochePlugin
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+group = 'probe'; version = '1'
+apply plugin: ClochePlugin
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.msrandom.net/repository/root/' }
+}
+cloche.metadata.modId.set('identity_probe')
+def unnamed = providers.gradleProperty('identityUnnamed').isPresent()
+def clientFirst = providers.gradleProperty('identityClientFirst').isPresent()
+def left = unnamed ? cloche.singleTarget { c -> c.fabric { } } : cloche.fabric('left') { }
+def targets = [left]
+if (!unnamed) targets.add(cloche.fabric('right') { })
+targets.each { t ->
+    t.minecraftVersion.set('1.20.1'); t.loaderVersion.set('0.16.0'); t.mixinPreapplication.set(false)
+}
+def configureSecondaries = { t -> t.data.configure { }; t.getTest().configure { } }
+if (clientFirst) left.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+configureSecondaries(left)
+if (!clientFirst) left.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+if (!unnamed) configureSecondaries(targets[1])
+def common = unnamed ? null : cloche.common('common')
+if (common != null) {
+    if (clientFirst) common.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+    configureSecondaries(common)
+    if (!clientFirst) common.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+}
+configurations.matching { it.name.endsWith('MinecraftLibraries') }.configureEach { dependencies.clear() }
+configurations.matching { it.name.endsWith('Api') || it.name == 'api' }.configureEach {
+    dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' }
+}
+def lc = left.client.value.get()
+def compilations = [left.main, left.data.value.get(), left.getTest().value.get(), lc, lc.data.value.get(), lc.getTest().value.get()]
+if (common != null) {
+    def cc = common.client.value.get()
+    compilations.addAll([common.main, common.data.value.get(), common.getTest().value.get(), cc, cc.data.value.get(), cc.getTest().value.get()])
+}
+if (!unnamed) compilations.addAll([targets[1].main, targets[1].data.value.get(), targets[1].getTest().value.get()])
+def coordinate = { c ->
+    def targetPart = c.target.capabilitySuffix == null ? '' : '-' + c.target.capabilitySuffix
+    def rolePart = c.capabilitySuffix.orNull == null ? '' : '-' + c.capabilitySuffix.get()
+    "${project.group}:${project.name}${targetPart}${rolePart}:${project.version}".toString()
+}
+def cap = { c -> "${c.group}:${c.name}:${c.version}".toString() }
+def withoutData = Attribute.of('earth.terrarium.cloche.withoutdata', Boolean)
+tasks.register('verifyIdentities') {
+    doLast {
+        def outgoing = []
+        def requests = []
+        def selections = []
+        compilations.each { c ->
+            assert c.capability.get() == coordinate(c)
+            if (c.isTest()) {
+                assert configurations.findByName(c.sourceSet.name + 'ApiElements') == null
+                assert configurations.findByName(c.sourceSet.name + 'RuntimeElements') == null
+            } else {
+                [c.sourceSet.apiElementsConfigurationName, c.sourceSet.runtimeElementsConfigurationName].each { name ->
+                    def cfg = configurations.getByName(name)
+                    def caps = cfg.outgoing.capabilities.collect(cap).toSet()
+                    assert caps == ["${project.group}:${project.name}:${project.version}".toString(), coordinate(c)].toSet()
+                    outgoing.add([configuration:name, capabilities:caps.sort()])
+                }
+            }
+            [c.sourceSet.compileClasspathConfigurationName, c.sourceSet.runtimeClasspathConfigurationName].each { name ->
+                def cfg = configurations.getByName(name)
+                cfg.allDependencies.withType(ProjectDependency).findAll { it.path == project.path }.each { d ->
+                    def requested = d.requestedCapabilities.collect(cap)
+                    assert requested.size() == 1
+                    def dependency = compilations.find { !it.isTest() && coordinate(it) == requested.first() }
+                    assert dependency != null : [consumer:name, requested:requested, known:compilations.collect { [it.toString(), coordinate(it)] }]
+                    def attributes = configurations.getByName(dependency.sourceSet.apiElementsConfigurationName).attributes
+                    d.attributes.keySet().findAll { it != withoutData }.each { a ->
+                        assert d.attributes.getAttribute(a) == attributes.getAttribute(a)
+                    }
+                    if (c.target != common && c.name.endsWith('data')) assert d.attributes.getAttribute(withoutData) == true
+                    requests.add([consumer:name, requested:requested, attributes:d.attributes.keySet().collectEntries { [(it.name):d.attributes.getAttribute(it).toString()] }])
+                }
+                assert cfg.incoming.resolutionResult.root.dependencies.every { it instanceof ResolvedDependencyResult }
+                def selected = cfg.incoming.resolutionResult.root.dependencies.findAll { it instanceof ResolvedDependencyResult && it.selected.id instanceof ProjectComponentIdentifier }
+                selected.each { d ->
+                    assert d.resolvedVariant.capabilities.collect(cap).any { it.startsWith("${project.group}:${project.name}") }
+                }
+                def view = cfg.incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+                def producerPaths = view.files.buildDependencies.getDependencies(null)*.path
+                def runtime = name == c.sourceSet.runtimeClasspathConfigurationName
+                // Runtime retains its existing directory or archive producer; this check does not execute the game/runtime graph.
+                def files = runtime ? [] : view.artifacts.artifacts.collect { a -> [file:a.file.path, variant:a.variant.displayName,
+                    attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] },
+                    capabilities:a.variant.capabilities.collect(cap)] }
+                assert files.every { !it.file.endsWith('.jar') }
+                selected.each { d ->
+                    assert compilations.any { !it.isTest() && d.resolvedVariant.capabilities.collect(cap).contains(coordinate(it)) }
+                }
+                files.each { artifact ->
+                    def owner = compilations.find { it.sourceSet.output.classesDirs.files.any { f -> f.path == artifact.file } }
+                    assert owner != null
+                    assert producerPaths.contains(':' + owner.sourceSet.compileJavaTaskName)
+                }
+                assert !producerPaths.any { it.toLowerCase().contains('alias') || it.toLowerCase().contains('testjar') }
+                if (selected) assert !producerPaths.empty
+                selections.add([configuration:name, files:files, producers:view.files.buildDependencies.getDependencies(null)*.path.sort(),
+                    variants:selected.collect { [requested:it.requested.toString(), variant:it.resolvedVariant.displayName, capabilities:it.resolvedVariant.capabilities.collect(cap)] }])
+            }
+        }
+        if (common != null) {
+            assert requests.any { it.requested.contains(coordinate(common.main)) }
+            assert common.main.capabilitySuffix.get() == 'server'
+        }
+        def nativeTests = [[lc.getTest().value.get(), left.getTest().value.get()]]
+        if (common != null) nativeTests.add([common.client.value.get().getTest().value.get(), common.getTest().value.get()])
+        nativeTests.each { pair ->
+            assert pair[0].sourceSet.compileClasspath.files.containsAll(pair[1].sourceSet.output.files)
+            assert pair[0].sourceSet.runtimeClasspath.files.containsAll(pair[1].sourceSet.output.files)
+        }
+        assert requests.any { it.requested.contains(coordinate(left.main)) }
+        assert requests.any { it.requested.contains(coordinate(lc)) }
+        assert lc.capabilitySuffix.orNull == null
+        if (!unnamed) assert targets[1].main.capabilitySuffix.orNull == null
+        file('identity-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([unnamed:unnamed, clientFirst:clientFirst, outgoing:outgoing, requests:requests, selections:selections]))
+        println 'VERIFIED_IDENTITIES ' + [unnamed, clientFirst, outgoing.size(), requests.size(), selections.size()]
+    }
+}

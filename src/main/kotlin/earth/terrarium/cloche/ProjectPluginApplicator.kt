@@ -7,6 +7,8 @@ import earth.terrarium.cloche.api.attributes.CommonTargetAttributes
 import earth.terrarium.cloche.api.attributes.CompilationAttributes
 import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
 import earth.terrarium.cloche.api.attributes.TargetAttributes
+import earth.terrarium.cloche.target.compilation.MIXIN_STATE_ATTRIBUTE
+import earth.terrarium.cloche.target.compilation.RAW_MIXIN_STATE
 import earth.terrarium.cloche.target.MOD_ID_CATEGORY
 import earth.terrarium.cloche.target.applyTargets
 import earth.terrarium.cloche.tasks.WriteModId
@@ -133,6 +135,7 @@ fun applyToProject(target: Project) {
     target.dependencies.artifactTypes {
         named(ArtifactTypeDefinition.JAR_TYPE) {
             attributes
+                .attribute(MIXIN_STATE_ATTRIBUTE, RAW_MIXIN_STATE)
                 .attribute(REMAPPED_ATTRIBUTE, false)
                 .attribute(NO_NAME_MAPPING_ATTRIBUTE, false)
                 .attribute(IncludeTransformationStateAttribute.ATTRIBUTE, IncludeTransformationStateAttribute.None)

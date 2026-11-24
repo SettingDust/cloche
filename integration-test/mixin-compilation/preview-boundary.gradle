@@ -1,0 +1,89 @@
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.compilation.MixinPreapplicationKt
+import groovy.json.JsonOutput
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// The boundary receives only Gradle handles and explicit domain inputs.
+def reads = 0
+def commonProducer = tasks.register('produceCommon') { outputs.file(layout.buildDirectory.file('common.jar')) }
+def clientProducer = tasks.register('produceClient') { outputs.file(layout.buildDirectory.file('client.jar')) }
+def common = layout.file(commonProducer.map { reads++; it.outputs.files.singleFile })
+def client = layout.file(clientProducer.map { reads++; it.outputs.files.singleFile })
+def side = objects.property(String).convention('SERVER')
+def enabled = objects.property(Boolean).convention(false)
+def off = objects.property(Boolean).convention(true)
+def C = configurations.resolvable('previewC')
+def offC = configurations.resolvable('offPreviewC')
+def mod = configurations.resolvable('mods')
+def ordinary = configurations.resolvable('ordinary')
+def namespace = objects.property(String).convention('intermediary')
+def mappings = layout.projectDirectory.file('input/mappings.tiny')
+def games = new GameShards.Split(common, client)
+def register = { String name, def configuration, def shape, def s, def e ->
+    MixinPreapplicationKt.registerMixinPreview(project, name, 'data', ":$name:data", layout.buildDirectory.dir(name),
+        configuration, mod, ordinary, files(), shape, s, e, files('input/auxiliary.txt'), namespace, providers.provider { mappings })
+}
+def preview = register('probe', C, games, side, enabled)
+def disabled = register('off', offC, games, providers.provider { 'CLIENT' }, off)
+def joined = register('joined', configurations.resolvable('joinedC'), new GameShards.Joined(common), providers.provider { 'CLIENT' }, providers.provider { true })
+assert reads == 0
+assert preview.tasks instanceof GameShards.Split && preview.strippedGames instanceof GameShards.Split
+assert joined.tasks instanceof GameShards.Joined && joined.strippedGames instanceof GameShards.Joined
+// Legal final DSL changes precede state installation and afterEvaluate registration.
+side.set('CLIENT')
+enabled.set(true)
+off.set(false)
+namespace.set('')
+def expected = tasks.withType(Mixin).names.toSet()
+def deps = { p -> files(p).buildDependencies.getDependencies(null)*.path.sort() }
+tasks.register('verifyPreviewBoundary') {
+    doLast {
+        assert reads == 0
+        assert C.get().files.empty && offC.get().files.empty
+        def state = MixinPreapplicationKt.MIXIN_STATE_ATTRIBUTE
+        assert C.get().attributes.getAttribute(state) == ':probe:data:CLIENT'
+        assert !offC.get().attributes.keySet().contains(state)
+        def tasksByRole = preview.tasks
+        def commonTask = tasksByRole.common.get()
+        def clientTask = tasksByRole.client.get()
+        assert preview.operations.get() == [tasksByRole.common, tasksByRole.client]
+        assert preview.records.get() == [commonTask.appliedMixins.get(), clientTask.appliedMixins.get()]
+        assert deps(preview.records) == [commonTask.path, clientTask.path].sort(false)
+        assert commonTask.inputFile.get() == common.get() && clientTask.inputFile.get() == client.get()
+        assert commonTask.classpath.files.toList() == [client.get().asFile, common.get().asFile, file('input/auxiliary.txt')]
+        assert commonTask.classpath.files == clientTask.classpath.files
+        assert deps(commonTask.inputFile) == [commonProducer.get().path]
+        assert deps(clientTask.inputFile) == [clientProducer.get().path]
+        assert commonTask.outputFile.get().asFile == layout.buildDirectory.file('probe/common/preapplied.jar').get().asFile
+        assert clientTask.appliedMixins.get().asFile == layout.buildDirectory.file('probe/client/applied-mixins.json').get().asFile
+        assert !commonTask.mappingFile.isPresent() && !commonTask.sourceNamespace.isPresent() && !commonTask.targetNamespace.isPresent()
+        assert joined.operations.get() == [joined.tasks.value]
+        assert joined.records.get() == [joined.tasks.value.get().appliedMixins.get()]
+        assert MixinPreapplicationKt.gamesInCompileOrder(games, 'CLIENT') == [client, common]
+        assert MixinPreapplicationKt.gamesInRecordOrder(games, 'CLIENT') == [common, client]
+        side.set('SERVER')
+        assert preview.operations.get() == [tasksByRole.common]
+        assert preview.records.get() == [commonTask.appliedMixins.get()]
+        assert commonTask.classpath.files.toList() == [common.get().asFile]
+        assert MixinPreapplicationKt.gamesInCompileOrder(games, 'SERVER') == [common]
+        assert MixinPreapplicationKt.gamesInRecordOrder(games, 'SERVER') == [common]
+        for (method in ['gamesInCompileOrder', 'gamesInRecordOrder']) {
+            for (invalid in [[games, 'OTHER'], [new GameShards.Joined(common), 'SERVER']]) {
+                try { MixinPreapplicationKt."$method"(invalid[0], invalid[1]); assert false }
+                catch (IllegalArgumentException expectedFailure) { assert expectedFailure.message }
+            }
+        }
+        assert tasks.withType(Mixin).names.toSet() == expected
+        file('preview-boundary.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            staticTasks:expected.sort(), clientOrder:['client','common'], recordOrder:['common','client'], server:['common'],
+            taskRecords:[commonTask.appliedMixins.get().asFile.path,clientTask.appliedMixins.get().asFile.path],
+            offHasState:false, constructionReads:0, pairedProducers:true]))
+        println 'VERIFIED_PREVIEW_BOUNDARY_SHAPES_LATE_SIDE_ENABLED_RECORDS_PRODUCERS_EMPTY_NAMESPACE'
+    }
+}

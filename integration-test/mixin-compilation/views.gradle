@@ -1,0 +1,176 @@
+import earth.terrarium.cloche.target.compilation.TargetCompilationKt
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// Applied to the real tiny-game fixture. This task requests raw inputs only.
+def target = cloche.singleTarget { spec -> spec.fabric { } }
+def c = target.main
+def viewsCompile = c.compileConfiguration.get()
+def R = configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName)
+def originalSourceSet = c.sourceSet
+def nativeResource = project(':populated').file('src/main/resources/native.txt')
+nativeResource.parentFile.mkdirs()
+nativeResource.text = 'native resource producer'
+def viewsState = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def remapped = Attribute.of('earth.terrarium.cloche.remapped', Boolean)
+def lateAttribute = Attribute.of('views.late', String)
+def fullC = TargetCompilationKt.getUnmappedClasspath(project, providers.provider { viewsCompile })
+def fullR = TargetCompilationKt.getUnmappedClasspath(project, providers.provider { R })
+def modC = configurations.named('modCompileClasspath')
+def ordinaryC = configurations.named('nonModCompileClasspath')
+def narrow = TargetCompilationKt.getRawRoleFiles(project, providers.provider { viewsCompile }, modC, true)
+assert viewsCompile.state == Configuration.State.UNRESOLVED && R.state == Configuration.State.UNRESOLVED
+assert [modC, ordinaryC, configurations.named('modRuntimeClasspath'), configurations.named('nonModRuntimeClasspath')].every { it.get().state == Configuration.State.UNRESOLVED }
+viewsCompile.attributes.attribute(lateAttribute, 'compile')
+R.attributes.attribute(lateAttribute, 'runtime')
+
+def produce = tasks.register('produceViewsInput') {
+    outputs.files(layout.buildDirectory.file('views/compile.jar'), layout.buildDirectory.file('views/runtime.jar'))
+    doLast {
+        ['compile', 'runtime'].each { name ->
+            def output = layout.buildDirectory.file("views/${name}.jar").get().asFile
+            output.parentFile.mkdirs()
+            output.bytes = file('repository/ordinary/ref/1/ref-1.jar').bytes
+        }
+        println 'VIEWS_NATIVE_PRODUCER'
+    }
+}
+def compileFile = files(layout.buildDirectory.file('views/compile.jar')).builtBy(produce)
+def runtimeFile = files(layout.buildDirectory.file('views/runtime.jar')).builtBy(produce)
+// User scopes deliberately do not belong to either auxiliary bucket graph.
+def userCompile = configurations.dependencyScope('viewsUserCompile') { dependencies.add(project.dependencies.create(compileFile)) }
+def userRuntime = configurations.dependencyScope('viewsUserRuntime') { dependencies.add(project.dependencies.create(runtimeFile)) }
+viewsCompile.extendsFrom(userCompile.get())
+R.extendsFrom(userRuntime.get())
+sourceSets.main.compileClasspath += files('input/auxiliary.txt')
+sourceSets.main.runtimeClasspath += files('input/own.json')
+
+// Building a view before the auxiliary configuration exists must not look it up yet.
+def lateC = configurations.resolvable('viewsLateClasspath')
+def early = TargetCompilationKt.getRawRoleFiles(project, lateC, providers.provider { configurations.getByName('viewsLateRole') }, false)
+assert !configurations.names.contains('viewsLateRole')
+def lateBucket = configurations.dependencyScope('viewsLateBucket') { dependencies.add(project.dependencies.create(compileFile)) }
+lateC.configure { extendsFrom(lateBucket.get()) }
+configurations.resolvable('viewsLateRole') { extendsFrom(lateBucket.get()) }
+
+// Exercise original main/data/test/client buckets, without changing their SourceSets or consumers.
+target.data.configure { }
+target.getTest().configure { }
+target.client.configure { client -> client.data.configure { }; client.getTest().configure { } }
+configurations.matching { it.name.endsWith('MinecraftLibraries') }.configureEach { dependencies.clear() }
+def client = target.client.value.get()
+def compilations = [c, target.data.value.get(), target.getTest().value.get(), client, client.data.value.get(), client.getTest().value.get()]
+def inheritedNames = { cfg -> cfg.extendsFrom*.name.toSet() }
+def dumpAttributes = { cfg -> cfg.attributes.keySet().collectEntries { [(it.name):cfg.attributes.getAttribute(it).toString()] } }
+def artifact = { a -> [id:a.id.displayName, variant:a.variant.displayName, file:a.file.path, attributes:dumpAttributes(a.variant)] }
+
+tasks.register('verifyRawViews') {
+    inputs.files(fullC, fullR, narrow, early)
+    doLast {
+        def frozen = project.ext.pluginFiles.find { it.name.startsWith('minecraft-codev-mixins-') }
+        [net.msrandom.minecraftcodev.mixins.task.Mixin, net.msrandom.minecraftcodev.mixins.StripMixins].each { type ->
+            def source = new File(type.protectionDomain.codeSource.location.toURI())
+            assert source.bytes == frozen.bytes
+            println "VIEWS_CODE_SOURCE ${type.name} $source"
+        }
+        assert net.msrandom.minecraftcodev.mixins.StripMixins.Parameters.getMethod('getRemovalsFile').returnType == org.gradle.api.file.ConfigurableFileCollection
+        assert c.compileConfiguration.get().is(viewsCompile) && configurations.getByName('runtimeClasspath').is(R)
+        assert c.sourceSet.is(originalSourceSet) && sourceSets.main.is(originalSourceSet)
+        def rawView = { cfg -> cfg.incoming.artifactView {
+            componentFilter { !(it instanceof ProjectComponentIdentifier) }
+            attributes.attribute(viewsState, 'raw')
+            attributes.attribute(remapped, false)
+        } }
+        assert fullC.files == rawView(viewsCompile).files.files
+        assert fullR.files == rawView(R).files.files
+        assert file('build/views/compile.jar') in fullC.files && !(file('build/views/compile.jar') in fullR.files)
+        assert file('build/views/runtime.jar') in fullR.files && !(file('build/views/runtime.jar') in fullC.files)
+        assert fullC.files.any { it.name == 'ref-1.jar' } && !fullR.files.any { it.name == 'ref-1.jar' && it.parentFile.path.contains('probe') }
+        assert fullR.files.any { it.name == 'runtime-1.jar' } && !fullC.files.any { it.name == 'runtime-1.jar' }
+        assert early.files == compileFile.files
+        assert fullC.buildDependencies.getDependencies(null).contains(produce.get())
+        assert fullR.buildDependencies.getDependencies(null).contains(produce.get())
+        assert early.buildDependencies.getDependencies(null).contains(produce.get())
+        def rows = []
+        compilations.each { viewItem ->
+            def ss = viewItem.sourceSet
+            def compile = configurations.getByName(ss.compileClasspathConfigurationName)
+            def runtime = configurations.getByName(ss.runtimeClasspathConfigurationName)
+            def mod = { name -> 'mod' + name.capitalize() }
+            def nonmod = { name -> 'nonMod' + name.capitalize() }
+            def mc = configurations.getByName(mod(compile.name))
+            def mr = configurations.getByName(mod(runtime.name))
+            def nc = configurations.getByName(nonmod(compile.name))
+            def nr = configurations.getByName(nonmod(runtime.name))
+            def compileBuckets = [ss.compileOnlyConfigurationName, ss.implementationConfigurationName,
+                ss.name == 'main' ? 'localImplementation' : ss.name + 'LocalImplementation']
+            def runtimeBuckets = [ss.runtimeOnlyConfigurationName, ss.implementationConfigurationName,
+                ss.name == 'main' ? 'localRuntime' : ss.name + 'LocalRuntime',
+                ss.name == 'main' ? 'localImplementation' : ss.name + 'LocalImplementation']
+            if (!viewItem.isTest()) { compileBuckets.addAll([ss.compileOnlyApiConfigurationName, ss.apiConfigurationName]); runtimeBuckets.add(ss.apiConfigurationName) }
+            assert inheritedNames(mc) == compileBuckets.collect(mod).toSet()
+            assert inheritedNames(mr) == runtimeBuckets.collect(mod).toSet()
+            assert inheritedNames(nc) == compileBuckets.toSet()
+            assert inheritedNames(nr) == runtimeBuckets.toSet()
+            assert !mc.transitive && !mr.transitive && nc.transitive && nr.transitive
+            assert viewItem.isTest() == (configurations.findByName(ss.apiElementsConfigurationName) == null)
+            if (!viewItem.isTest()) assert configurations.getByName(ss.apiElementsConfigurationName).outgoing.capabilities.any {
+                "${it.group}:${it.name}:${it.version}".toString() == viewItem.capability.get()
+            }
+            rows.add([sourceSet:ss.name, compile:compile.name, runtime:runtime.name,
+                buckets:[mc, mr, nc, nr].collect { [name:it.name, inherits:inheritedNames(it).sort(), transitive:it.transitive] }])
+        }
+        // Resolution executes the old withDependencies attribute hook, including attributes added after view creation.
+        modC.get().incoming.artifacts.artifacts
+        assert modC.get().attributes.getAttribute(lateAttribute) == 'compile'
+        assert modC.get().attributes.getAttribute(viewsState) == 'raw'
+        assert viewsCompile.attributes.getAttribute(viewsState) != 'raw'
+        def reference = rawView(viewsCompile).artifacts.artifacts
+        def role = rawView(modC.get()).artifacts.artifacts
+        def identities = role.collect { [it.id, it.variant] }.toSet()
+        assert narrow.files == reference.findAll { identities.contains([it.id, it.variant]) }*.file.toSet()
+        assert !narrow.files.contains(file('build/views/compile.jar'))
+        assert fullC.files.containsAll(narrow.files)
+        assert !gradle.taskGraph.allTasks.any { it.name.startsWith('preapply') || it.name.startsWith('accessWiden') || it.name == 'compileJava' }
+        assert !project(':empty').file('build/classes/java/main').exists()
+        file('views-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            viewsCompile:fullC.files*.path, R:fullR.files*.path, narrow:narrow.files*.path, raw:reference.collect(artifact),
+            role:role.collect(artifact), configurations:rows, attributes:dumpAttributes(modC.get()),
+            producers:fullC.buildDependencies.getDependencies(null)*.path.sort(), graph:gradle.taskGraph.allTasks*.path]))
+        println 'VERIFIED_RAW_VIEWS_IDENTITY_BUCKETS_LAZY_PRODUCERS'
+    }
+}
+
+tasks.register('verifyViewsClasspath') {
+    inputs.files(sourceSets.main.compileClasspath, sourceSets.main.runtimeClasspath)
+    earth.terrarium.cloche.target.compilation.MixinPreapplicationKt.dependOnPreapplication(c, it)
+    doLast {
+        assert c.compileConfiguration.get().is(viewsCompile) && c.sourceSet.is(originalSourceSet)
+        assert sourceSets.main.compileClasspath.files.contains(file('input/auxiliary.txt'))
+        assert sourceSets.main.runtimeClasspath.files.contains(file('input/own.json'))
+        def projects = viewsCompile.incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+        assert projects.files.files.contains(project(':empty').file('build/classes/java/main'))
+        assert projects.files.files.contains(project(':populated').file('build/classes/java/main'))
+        assert !project(':empty').file('build/classes/java/main').exists()
+        def runtimeProjects = R.incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+        assert runtimeProjects.files.files.any { output ->
+            output.isDirectory() ? (new File(output, 'native.txt').isFile() && new File(output, 'native.txt').text == 'native resource producer') :
+                (output.isFile() && new java.util.zip.ZipFile(output).withCloseable { zip -> zip.getEntry('native.txt') != null })
+        }
+        assert gradle.taskGraph.allTasks.contains(project(':populated').tasks.named('processResources').get())
+        assert !sourceSets.main.runtimeClasspath.files.any { it.path.contains('mixinStripped') }
+        file('views-classpath-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            compile:projects.artifacts.artifacts.collect(artifact), runtime:runtimeProjects.artifacts.artifacts.collect(artifact),
+            compileProducers:projects.files.buildDependencies.getDependencies(null)*.path.sort(),
+            runtimeProducers:runtimeProjects.files.buildDependencies.getDependencies(null)*.path.sort(),
+            graph:gradle.taskGraph.allTasks*.path]))
+        println 'VERIFIED_VIEWS_CLASSPATH_USER_ADDITIONS_NATIVE_PROJECTS'
+    }
+}

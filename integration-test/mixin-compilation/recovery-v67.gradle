@@ -1,0 +1,89 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// Applied only by the private V6/V7 recovery fixture.
+def label = providers.gradleProperty('v67Label').get()
+def context = providers.gradleProperty('v67Context').getOrElse('chosen')
+tasks.withType(Mixin).configureEach {
+    refmapContext.set(context)
+    def protectedInputs = [:]
+    doFirst {
+        (classpath.files + mixinFiles.files + [inputFile.get().asFile, mappingFile.get().asFile]).findAll { it.isFile() }.each { f ->
+            protectedInputs[f] = MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString()
+        }
+    }
+    doLast {
+        protectedInputs.each { f, before -> assert before == MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() : f }
+        println 'V67_INPUTS_UNCHANGED ' + path + ' ' + protectedInputs
+    }
+}
+afterEvaluate {
+    if (providers.gradleProperty('v67Namespace').isPresent()) tasks.withType(Mixin).configureEach { sourceNamespace.set(providers.gradleProperty('v67Namespace')) }
+}
+if (providers.gradleProperty('v67Side').isPresent()) tasks.withType(Mixin).configureEach { side.set(providers.gradleProperty('v67Side')) }
+def sha = { File f -> MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() }
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { [(it.name):z.getInputStream(it).bytes] } } }
+tasks.register('verifyV67') {
+    dependsOn 'compileJava', 'compileKotlin', 'includeJar'
+    doLast {
+        def compilation = cloche.singleTarget { c -> c.fabric { } }.main
+        def side = providers.gradleProperty('v67Side').getOrElse('CLIENT')
+        def operations = compilation.preapplyMixinsTasks.get()*.get()
+        def games = compilation.compileMinecraftFiles.get()*.asFile
+        assert operations.size() == 2
+        assert games.size() == operations.size()
+        def observations = operations.collect { op ->
+            def records = op.appliedMixins.get().asFile
+            assert records.exists()
+            assert !entries(op.outputFile.get().asFile).containsKey(records.name)
+            [task:op.path, side:op.side.get(), source:op.mixinFiles.files.collect { [path:it.canonicalPath, sha256:sha(it)] },
+             mapping:[path:op.mappingFile.get().asFile.canonicalPath, sha256:sha(op.mappingFile.get().asFile), source:op.sourceNamespace.get(), target:op.targetNamespace.get(), context:op.refmapContext.get()],
+             P:[path:op.outputFile.get().asFile.canonicalPath, sha256:sha(op.outputFile.get().asFile)],
+             N:[path:records.canonicalPath, sha256:sha(records), contents:new JsonSlurper().parse(records)]]
+        }
+        assert observations*.task == [':preapplyCommonMixins', ':preapplyClientMixins']
+        assert observations*.side == [side, side]
+        assert observations[0].N.contents['ref.json'].contains('Ref')
+        def files = sourceSets.main.compileClasspath.files
+        new URLClassLoader(files.collect { it.toURI().toURL() } as URL[], (ClassLoader)null).withCloseable { loader ->
+            def game = loader.loadClass('named.Game')
+            def constructor = game.getDeclaredConstructor(); constructor.setAccessible(true)
+            assert loader.loadClass('probe.Ref').getMethod('callRef').invoke(constructor.newInstance()) == providers.gradleProperty('v67Expected').getOrElse('11').toInteger()
+            assert game.getDeclaredMethod(providers.gradleProperty('v67MappedMethod').getOrElse('namedA')) != null
+            if (providers.gradleProperty('v67PublicMethod').isPresent()) assert java.lang.reflect.Modifier.isPublic(game.getDeclaredMethod(providers.gradleProperty('v67PublicMethod').get()).modifiers)
+        }
+        def observation = [label:label, pid:ProcessHandle.current().pid(), gradle:gradle.gradleVersion, java:System.getProperty('java.version'),
+            operations:observations, games:games.collect { [path:it.canonicalPath, sha256:sha(it)] },
+            compile:files.collect { [path:it.canonicalPath, sha256:it.isFile() ? sha(it) : null] }]
+        def snapshot = file("snapshots/$label")
+        snapshot.mkdirs()
+        def capture = { File f, String relative ->
+            def saved = new File(snapshot, relative)
+            saved.parentFile.mkdirs()
+            saved.bytes = f.bytes
+        }
+        operations.eachWithIndex { op, index ->
+            capture(op.outputFile.get().asFile, "operation-$index/P.jar")
+            capture(op.appliedMixins.get().asFile, "operation-$index/N.json")
+            capture(op.inputFile.get().asFile, "operation-$index/input.jar")
+            capture(op.mappingFile.get().asFile, "operation-$index/mapping.tiny")
+            op.mixinFiles.files.eachWithIndex { f, sourceIndex -> capture(f, "operation-$index/sources/${sourceIndex}.jar") }
+        }
+        games.eachWithIndex { f, index -> capture(f, "games/${index}.jar") }
+        files.findAll { it.isFile() && it.name.contains('mixinStripped') }.eachWithIndex { f, index -> capture(f, "clean/${index}.jar") }
+        capture(file('input/game.accesswidener'), 'game.accesswidener')
+        capture(file('input/mappings.tiny'), 'mappings.tiny')
+        capture(file('build.gradle'), 'build.gradle')
+        file("${label}.json").text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+        println "VERIFIED_V67 $label"
+    }
+}

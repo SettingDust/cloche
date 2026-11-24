@@ -124,12 +124,13 @@ publishing {
 
 tasks.test {
     useJUnitPlatform()
-    exclude("**/IncludeTargetIdentityTests*")
+    exclude("**/IncludeTargetIdentityTests*", "**/MixinCompilationTests*")
 
     dependsOn(tasks.pluginUnderTestMetadata)
 }
 
 tasks.register<Test>("includeIdentityTest") {
+    doNotTrackState("Uses the installed Gradle without fingerprinting its shared cache and live locks")
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform()
@@ -166,12 +167,25 @@ tasks.register<Test>("includeIdentityTest") {
         reportsDirectory.get().file("compile-classpath.txt").asFile.writeText(published.joinToString("\n", postfix = "\n"))
     }
     inputs.dir(layout.projectDirectory.dir("integration-test/include-identity"))
-    systemProperty("fixture.gradleJava", System.getProperty("java.home"))
     systemProperty("fixture.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
     systemProperty("org.gradle.testkit.dir", gradle.gradleUserHomeDir.absolutePath)
     providers.gradleProperty("org.gradle.java.installations.paths").orNull
         ?.takeIf { it.isNotEmpty() }
         ?.let { systemProperty("org.gradle.java.installations.paths", it) }
+}
+
+tasks.register<Test>("mixinCompilationTest") {
+    // The local Gradle installation contains its shared .gradle; never snapshot that tree as a test input.
+    doNotTrackState("Runs fresh private TestKit builds without fingerprinting the installation's shared cache")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    include("**/MixinCompilationTests*")
+    dependsOn(tasks.pluginUnderTestMetadata)
+    workingDir(layout.projectDirectory)
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    systemProperty("fixture.metadata", layout.buildDirectory.file("pluginUnderTestMetadata/plugin-under-test-metadata.properties").get().asFile.absolutePath)
+    inputs.dir(layout.projectDirectory.dir("integration-test/mixin-compilation"))
 }
 
 kotlin {

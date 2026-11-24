@@ -1,0 +1,132 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def target = project.hasProperty('pathTarget') ? project.pathTarget : cloche.targets.findAll { it instanceof MinecraftTargetInternal }.first()
+// Extend the real fixtures only for this path check; the original full-common sync stays unchanged.
+target.data.configure { }; target.getTest().configure { }
+target.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+if (providers.gradleProperty('scenario').get().endsWith('off')) target.mixinPreapplication.set(false)
+def client = target.client.value.get()
+def roles = [target.main, target.data.value.get(), target.getTest().value.get(), client, client.data.value.get(), client.getTest().value.get()]
+roles.findAll { it != target.main }.each { c ->
+    c.dependencies { d ->
+        d.modCompileOnly.add('probe:ref:1')
+        d.modImplementation.add('probe:plain:1')
+        d.implementation.add('ordinary:ref:1')
+    }
+}
+configurations.matching { it.name.endsWith('Api') || it.name == 'api' }.configureEach {
+    dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' }
+}
+idea.module.downloadSources = false
+// Secondary sources retain native project producers, so shared source must suit the SERVER main too.
+file('src/main/java/Consume.java').text = 'public class Consume { named.Game game; }'
+file('src/main/kotlin/ConsumeKotlin.kt').text = 'class ConsumeKotlin(val game: named.Game)'
+
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def rows = []
+gradle.taskGraph.whenReady { graph ->
+    roles.each { c ->
+        def decompile = tasks.withType(Decompile).find { it.outputFile.get().asFile == c.sources.get().asFile }
+        assert decompile != null
+        assert graph.hasTask(decompile)
+        assert !target.mixinPreapplication.get() || c.preapplyMixinsTasks.get()*.get().every { graph.hasTask(it) }
+    }
+}
+tasks.withType(Decompile).configureEach { decompile ->
+    decompile.doFirst {
+        def c = roles.find { it.sources.get().asFile == outputFile.get().asFile }
+        assert c != null
+        assert inputFile.get() == selectedGame(c)
+        assert classpath.files.containsAll(c.compileConfiguration.get().files)
+        if (target.mixinPreapplication.get()) {
+            c.preapplyMixinsTasks.get().each { p ->
+                assert p.get().appliedMixins.get().asFile.isFile()
+                assert gradle.taskGraph.allTasks.indexOf(p.get()) < gradle.taskGraph.allTasks.indexOf(decompile)
+            }
+        }
+        println 'R4P_DECOMPILE_READY ' + [c.name, inputFile.get(), outputFile.get(), deps(inputFile)]
+    }
+}
+tasks.register('verifyPaths') {
+    inputs.files(roles.collect { it.sources })
+    inputs.files(roles.collect { it.finalMinecraftFile })
+    inputs.files(roles.collect { c -> c.runtimeExtraClasspathFiles })
+    inputs.files(roles.collect { c -> configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files })
+    doLast {
+        def enabled = target.mixinPreapplication.get()
+        def allOutputs = []
+        roles.eachWithIndex { c, i ->
+            def aw = c.finalMinecraftFile.get().asFile
+            def sources = c.sources.get().asFile
+            def decompile = tasks.withType(Decompile).find { it.outputFile.get().asFile == sources }
+            assert decompile != null
+            def awTask = project.files(c.finalMinecraftFile).buildDependencies.getDependencies(null).find { it instanceof AccessWiden }
+            assert awTask != null
+            assert awTask.outputFile.get().asFile == aw
+            assert decompile.outputFile.get().asFile == sources
+            def expectedDirectory = new File(target.outputDirectory.get().asFile, c.name.replace(':', '/'))
+            assert aw.parentFile == expectedDirectory && sources.parentFile == expectedDirectory
+            assert aw.isFile() && sources.isFile()
+            def rawGame = entries(aw)
+            assert rawGame.containsKey(c.name.startsWith('client') ? 'named/ClientGame.class' : 'named/Game.class')
+            def text = entries(sources).findAll { k, v -> k.endsWith('.java') }.collectEntries { k, v -> [(k):new String(v, 'UTF-8')] }
+            if (!c.name.startsWith('client')) {
+                assert (text['named/Game.java'].contains('Ref') && text['named/Game.java'].contains('implements')) == enabled
+            } else assert !text.containsKey('named/Game.java')
+            if (c.name.startsWith('client')) assert text['named/ClientGame.java'].contains('implements Client') == enabled
+            def runtime = configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files.files
+            assert !runtime.any { it.path.contains('mixinStripped') || it.path.contains('preapplication-client') }
+            runtime.findAll { it.name.startsWith('plain-') }.each { f ->
+                assert new String(entries(f)['plain.json'], 'UTF-8').contains('"Plain"')
+            }
+            if (!enabled) {
+                assert decompile.inputFile.get().asFile == aw
+                assert c.compileConfiguration.get().attributes.getAttribute(state) == null
+                assert !gradle.taskGraph.allTasks.any { (it instanceof Mixin || it.name.startsWith('join')) && it.name.toLowerCase().contains(target.featureName?.toLowerCase() ?: '') }
+                assert !c.preapplyMixinsTasks.get().first().get().appliedMixins.get().asFile.exists()
+            }
+            def projectView = c.compileConfiguration.get().incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+            def identity = [name:c.name, sourceSet:c.sourceSet.name, capability:c.capability.get(), operation:c.preapplyMixinsTasks.get().first().get().path, side:c.preapplicationSide.get()]
+            rows.add(identity + [aw:aw.path, sources:sources.path, awProducer:awTask.path, sourcesProducer:decompile.path,
+                input:decompile.inputFile.get().asFile.path, inputProducersAtExecution:deps(decompile.inputFile), runtimeGame:c.finalMinecraftFile.get().asFile.path,
+                runtime:runtime*.path, extras:c.runtimeExtraClasspathFiles.get()*.asFile*.path,
+                projects:projectView.artifacts.artifacts.collect { [id:it.id.toString(), variant:it.variant.displayName, file:it.file.path] }, projectProducers:deps(projectView.files), text:text])
+            allOutputs.addAll([aw, sources])
+        }
+        assert allOutputs.toSet().size() == allOutputs.size()
+        assert roles*.name == ['main', 'data', 'test', 'client', 'client:data', 'client:test']
+        // All auxiliary registrations use the same owner. Check declared paths, and open produced synthetic AWs.
+        def accessWidenTasks = tasks.names.findAll { it.startsWith('accessWiden') }.collect { tasks.named(it, AccessWiden).get() }
+        def decompileTasks = tasks.names.findAll { it.startsWith('decompile') }.collect { tasks.named(it, Decompile).get() }
+        def auxiliary = accessWidenTasks.collect { t ->
+            def output = t.outputFile.get().asFile
+            def relative = target.outputDirectory.get().asFile.toPath().relativize(output.toPath()).toString()
+            if (output.toPath().startsWith(target.outputDirectory.get().asFile.toPath())) assert !relative.contains(':')
+            if (output.isFile()) assert !entries(output).empty
+            [task:t.path, output:output.path, exists:output.isFile()]
+        }
+        def declarations = (accessWidenTasks.collect { it.outputFile.get().asFile } + decompileTasks.collect { it.outputFile.get().asFile })
+        assert declarations.toSet().size() == declarations.size()
+        assert auxiliary.any { it.output == target.main.finalMinecraftFile.get().asFile.path && it.exists }
+        def clocheType = Class.forName('earth.terrarium.cloche.target.compilation.TargetCompilationKt')
+        def clocheCodeSource = clocheType.protectionDomain.codeSource.location.toString()
+        println 'CLOCHE_CODE_SOURCE ' + clocheCodeSource
+        file('path-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([enabled:enabled, target:target.name, root:target.outputDirectory.get().asFile.path, clocheCodeSource:clocheCodeSource, metadata:file(providers.gradleProperty('clocheClasspathMetadata').get()).path, roles:rows, auxiliary:auxiliary, graph:gradle.taskGraph.allTasks*.path]))
+        println 'VERIFIED_PATHS ' + target.name + ' ' + enabled + ' ' + rows.size()
+    }
+}

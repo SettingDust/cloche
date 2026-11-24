@@ -1,0 +1,157 @@
+import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.target.compilation.CompilationInternalKt
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies {
+        classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)))
+        classpath files('legacy-sourceset-classes')
+    }
+}
+group = 'probe'
+version = '1'
+apply plugin: ClochePlugin
+def early = providers.gradleProperty('earlyKotlin').get().toBoolean()
+def single = providers.gradleProperty('singleTarget').get().toBoolean()
+if (early) apply plugin: 'org.jetbrains.kotlin.jvm'
+
+def sourceSetsAtCreation = [:]
+def configurationsAtCreation = [:]
+def events = []
+def bucketSnapshots = []
+def sync = tasks.named('clocheIdeSync').get()
+def originalSyncActions = sync.actions.size()
+sourceSets.all { ss -> sourceSetsAtCreation[ss.name] = ss }
+// Observe the actual middle of Handler wiring, before metadata/copy/compile/Linkage.
+configurations.each { configurationsAtCreation[it.name] = it }
+configurations.whenObjectAdded { cfg ->
+    configurationsAtCreation[cfg.name] = cfg
+    if (cfg.name.startsWith('mod') && cfg.name.endsWith('Implementation') && !cfg.name.endsWith('LocalImplementation')) {
+        def stem = cfg.name.substring(3, cfg.name.length() - 'Implementation'.length())
+        def name = stem ? stem.uncapitalize() : 'main'
+        def ss = sourceSets.findByName(name)
+        if (ss != null && (single || name.startsWith('left'))) {
+            assert sync.actions.size() > originalSyncActions
+            def javaDirs = ss.java.srcDirs*.canonicalPath
+            if (!single) assert javaDirs.any { it.replace('\\', '/').contains('/src/left/') }
+            def copyTask = 'copy' + (single ? '' : 'Left') + (name == 'main' || name == 'left' ? '' : stem.replaceFirst('^Left', '')) + 'Mixins'
+            assert !tasks.names.contains(copyTask) : [name, copyTask]
+            bucketSnapshots.add([configuration:cfg.name, sourceSet:ss.name, syncActions:sync.actions.size(), java:javaDirs])
+            events.add(name + ':buckets')
+        }
+    }
+}
+cloche.metadata.modId.set('sourceset_probe')
+def target = single ? cloche.singleTarget { c -> c.fabric { } } : cloche.fabric('left') { }
+target.minecraftVersion.set('1.20.1')
+target.loaderVersion.set('0.16.0')
+target.mixinPreapplication.set(false)
+if (!single) cloche.fabric('right') { t ->
+    t.minecraftVersion.set('1.20.1'); t.loaderVersion.set('0.16.0'); t.mixinPreapplication.set(false)
+}
+// These ordinary booleans still arrive after the main feature was registered.
+target.withSourcesJar()
+target.withJavadocJar()
+assert target.main.withSources && target.main.withJavadoc
+assert configurations.findByName(target.main.sourceSet.sourcesElementsConfigurationName) == null
+assert configurations.findByName(target.main.sourceSet.javadocElementsConfigurationName) == null
+
+def comps = [target.main]
+target.data.onConfigured { c ->
+    assert c.sourceSet.is(sourceSetsAtCreation[c.sourceSet.name])
+    assert events.contains(c.sourceSet.name + ':buckets')
+    assert tasks.names.contains('copy' + (single ? '' : 'Left') + 'DataMixins')
+    events.add('data:listener')
+}
+target.data.configure { c ->
+    assert events.last() == 'data:listener'
+    events.add('data:action')
+    c.withSourcesJar(); c.withJavadocJar()
+    assert configurations.findByName(c.sourceSet.sourcesElementsConfigurationName) == null
+    comps.add(c)
+}
+target.getTest().configure { comps.add(it) }
+target.client.configure { c ->
+    comps.add(c)
+    c.data.configure { comps.add(it) }
+    c.getTest().configure { comps.add(it) }
+}
+// The old descriptor is invoked from bytecode compiled against the unextracted implementation.
+def legacy = sourceSets.create('legacyProbe')
+def beforeLegacyActions = sync.actions.size()
+LegacySourceSetConsumer.configure(project, legacy, target, target.getTest().value.get())
+assert sync.actions.size() == beforeLegacyActions + 2
+if (!early) {
+    assert !plugins.hasPlugin('org.jetbrains.kotlin.jvm')
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+}
+
+def observations = []
+comps.each { c ->
+    def ss = c.sourceSet
+    assert ss.is(sourceSetsAtCreation[ss.name])
+    def C = configurations.getByName(ss.compileClasspathConfigurationName)
+    def R = configurations.getByName(ss.runtimeClasspathConfigurationName)
+    assert C.is(configurationsAtCreation[C.name]) && R.is(configurationsAtCreation[R.name])
+    assert C.state.toString() == 'UNRESOLVED' && R.state.toString() == 'UNRESOLVED'
+    def directory = single ? null : file('src/left/' + c.name.replace(':', '/'))
+    ['java', 'resources', 'kotlin'].each { language ->
+        def set = language == 'kotlin' ? ss.extensions.getByName('kotlin') : ss."$language"
+        def defaults = file('src/' + ss.name + '/' + language)
+        assert set.srcDirs.contains(defaults)
+        if (directory != null) assert set.srcDirs.contains(new File(directory, language))
+        def extra = file('user/' + ss.name + '/' + language)
+        set.srcDir(extra)
+        assert set.srcDirs.contains(extra)
+        observations.add([sourceSet:ss.name, language:language, dirs:set.srcDirs*.absolutePath.sort()])
+    }
+    if (c.isTest()) {
+        assert configurations.findByName(ss.name + 'ApiElements') == null
+        assert configurations.findByName(ss.name + 'RuntimeElements') == null
+        assert !tasks.names.contains(ss.jarTaskName)
+    } else {
+        def jar = tasks.named(ss.jarTaskName).get()
+        def expected = c.capabilitySuffix.orNull
+        if (!single) expected = expected == null ? 'left' : 'left-' + expected
+        assert c.includeJarTask.get().archiveClassifier.orNull == expected
+        assert c.remapJarTask.get().archiveClassifier.orNull == expected
+        assert jar.archiveClassifier.orNull == (expected ? expected + '-dev' : 'dev')
+        assert jar.destinationDirectory.get().asFile == cloche.intermediateOutputsDirectory.get().asFile
+        def runtime = configurations.getByName(ss.runtimeElementsConfigurationName)
+        assert runtime.outgoing.variants.names.containsAll(['classes', 'resources', 'classesAndResources'])
+        observations.add([sourceSet:ss.name, classifier:expected, dev:jar.archiveClassifier.orNull, variants:runtime.outgoing.variants.names.sort()])
+    }
+}
+// The captured classifier Provider still reads the final namespace.
+target.minecraftVersion.set('26.1')
+assert target.modRemapNamespace.get() == ''
+comps.findAll { !it.isTest() }.each { c ->
+    assert tasks.named(c.sourceSet.jarTaskName).get().archiveClassifier.orNull == c.includeJarTask.get().archiveClassifier.orNull
+}
+target.minecraftVersion.set('1.20.1')
+assert legacy.java.srcDirs.contains(file(single ? 'src/legacyProbe/java' : 'src/left/test/java'))
+assert legacy.extensions.getByName('kotlin').srcDirs.contains(file(single ? 'src/legacyProbe/kotlin' : 'src/left/test/kotlin'))
+def chooseSources = early
+idea.module.downloadSources = chooseSources
+// withIdeaModel registered its root afterEvaluate callbacks above. Changing this later must not retroactively change dependencies.
+afterEvaluate {
+    idea.module.downloadSources = !chooseSources
+    def selectedSources = sync.dependsOn.findAll { dep ->
+        dep instanceof org.gradle.api.provider.Provider && dep.getOrNull() instanceof org.gradle.api.file.RegularFile
+    }.collect { it.get().asFile }
+    assert selectedSources.size() == (chooseSources ? comps.size() + 1 + (single ? 0 : 1) : 0) : selectedSources
+    assert comps.every { c ->
+        def C = configurations.getByName(c.sourceSet.compileClasspathConfigurationName)
+        C.state.toString() == 'UNRESOLVED'
+    }
+    observations.add([sourcesAtCallback:chooseSources, finalDownloadSources:idea.module.downloadSources, selectedSources:selectedSources*.absolutePath])
+}
+tasks.register('verifySourceSetBoundaries') {
+    doLast {
+        assert bucketSnapshots.size() == comps.size()
+        file('sourceset-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([earlyKotlin:early, single:single, events:events, buckets:bucketSnapshots, observations:observations]))
+        println 'VERIFIED_SOURCESET_DIRECTORIES_SYNC_CLASSIFIERS_IDENTITIES_TIMING_LEGACY'
+    }
+}

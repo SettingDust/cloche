@@ -322,6 +322,7 @@ class IncludeTargetIdentityTests {
         scenario: String,
         fails: Boolean = false,
     ): Pair<Path, BuildResult> {
+        println("INCLUDE_WORKER JavaHome=${File(System.getProperty("java.home")).canonicalFile} TestKit=${GradleRunner::class.java.protectionDomain.codeSource.location}")
         val sources = mutableListOf<String>()
         val implementations = mapOf(
             IncludedJarInfo::class.java to "minecraft-codev-includes-0.1.0+terrarium.0.6.5.jar",
@@ -390,13 +391,18 @@ class IncludeTargetIdentityTests {
                 "--no-configuration-cache",
                 "--gradle-user-home",
                 home.path,
-                "-Dorg.gradle.java.home=" + System.getProperty("fixture.gradleJava"),
                 "-PfixtureScenario=$scenario",
             )
         System.getProperty("org.gradle.java.installations.paths")?.let { arguments.add("-Porg.gradle.java.installations.paths=$it") }
         try {
             val result = if (fails) runner.withArguments(arguments).buildAndFail() else runner.withArguments(arguments).build()
             Files.writeString(directory.resolve("gradle.log"), result.output)
+            val environment = checkNotNull(Regex("FIXTURE_TOOLCHAIN Gradle (\\S+) JVM (\\S+) (.+) HOME (.+)").find(result.output)) {
+                "Missing child build environment: ${result.output}"
+            }
+            assertEquals(org.gradle.util.GradleVersion.current().version, environment.groupValues[1])
+            assertEquals(File(System.getProperty("java.home")).canonicalFile, File(environment.groupValues[3]).canonicalFile)
+            assertEquals(home, File(environment.groupValues[4].trim()).canonicalFile)
             assertTrue(result.output.contains("CODE_SOURCE net.msrandom.minecraftcodev.includes.IncludedJarInfo"))
             assertTrue(result.output.contains("CODE_SOURCE net.msrandom.minecraftcodev.includes.IncludesJar"))
             assertFalse(

@@ -1,0 +1,95 @@
+import earth.terrarium.cloche.api.attributes.IncludeTransformationStateAttribute
+import earth.terrarium.cloche.api.attributes.ModDistribution
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.TargetCompilation
+import earth.terrarium.cloche.target.compilation.TargetCompilationInfo
+import net.msrandom.minecraftcodev.fabric.task.JarInJar
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import org.gradle.api.tasks.TaskProvider
+import javax.inject.Inject
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+abstract class ComposeProbe extends TargetCompilation {
+    @Inject ComposeProbe(TargetCompilationInfo info) { super(info) }
+    @Override TaskProvider getGenerateMetadataTask() { project.tasks.named('help') }
+}
+def target = cloche.singleTarget { it.fabric { } }
+def main = target.main
+def primary = objects.property(GamePart).value(GamePart.COMMON)
+def side = objects.property(String).value('CLIENT')
+def reads = [primary:0, side:0]
+def info = new TargetCompilationInfo('composeProbe', target, main.info.intermediaryMinecraftClasspath, main.info.namedGames,
+    primary.map { reads.primary++; it }, [:], providers.provider { [] }, providers.provider { ModDistribution.common },
+    false, false, IncludeTransformationStateAttribute.Stripped, JarInJar, main.info.preapplicationLibraries, side.map { reads.side++; it })
+def probe = objects.newInstance(ComposeProbe, info)
+assert reads == [primary:0, side:0]
+probe.accessWideners.from('input/game.accesswidener')
+for (suffix in ['CompileClasspath', 'RuntimeClasspath']) {
+    def configuration = configurations.getByName('composeProbe' + suffix)
+    configuration.extendsFrom(configurations.getByName(suffix.uncapitalize()))
+    for (role in ['mod', 'nonMod']) {
+        configurations.create(role + 'ComposeProbe' + suffix) {
+            canBeConsumed = false
+            extendsFrom(configurations.getByName(role + suffix))
+        }
+    }
+}
+def taskNames = tasks.names.toSet()
+def finalPart = providers.gradleProperty('composePrimary').get()
+def finalSide = providers.gradleProperty('composeSide').get()
+def enabled = providers.gradleProperty('composeEnabled').get().toBoolean()
+// Use the same Provider objects passed to the real setupFiles constructor, in both directions.
+primary.set(GamePart.CLIENT)
+primary.set(GamePart.COMMON)
+primary.set(GamePart.valueOf(finalPart))
+side.set('SERVER')
+side.set('CLIENT')
+side.set(finalSide)
+target.mixinPreapplication.set(!enabled)
+target.mixinPreapplication.set(enabled)
+assert reads == [primary:0, side:0]
+assert tasks.names.toSet() == taskNames
+sourceSets.main.java.setSrcDirs([])
+sourceSets.main.kotlin.setSrcDirs([])
+def consumption = probe.class.methods.find { it.name.startsWith('getCompilationConsumption$') }.invoke(probe)
+def preview = probe.class.methods.find { it.name.startsWith('getMixinPreview$') }.invoke(probe)
+tasks.register('verifyComposeLateInputs') {
+    inputs.files(probe.sources)
+    doLast {
+        assert probe.info.primaryGame.get() == GamePart.valueOf(finalPart)
+        def operations = probe.preapplyMixinsTasks.get()*.get()
+        assert operations.size() == (finalSide == 'SERVER' ? 1 : 2)
+        def games = probe.compileMinecraftFiles.get()
+        if (enabled) {
+            assert operations.every { it.state.executed }
+            assert games == (finalSide == 'SERVER' ? [preview.strippedGames.common.get()] : [preview.strippedGames.client.get(), preview.strippedGames.common.get()])
+            assert preview.records.get() == operations*.appliedMixins*.get()
+            assert preview.records.get()*.asFile.toSet().size() == operations.size()
+        } else {
+            assert !gradle.taskGraph.allTasks.any { it.name.startsWith('preapply') }
+            assert games == [probe.finalMinecraftFile.get()]
+        }
+        def task = tasks.named('decompileComposeProbeMinecraft', Decompile).get()
+        def primaryTask = tasks.named('accessWidenComposeProbeMinecraft').get()
+        def otherTask = tasks.named('accessWidenComposeProbeOtherMinecraft').get()
+        assert probe.finalMinecraftFile.get() == primaryTask.outputFile.get()
+        assert primaryTask.inputFile.get() == (finalPart == 'CLIENT' ? main.info.namedGames.client.get() : main.info.namedGames.common.get())
+        assert otherTask.inputFile.get() == (finalPart == 'COMMON' ? main.info.namedGames.client.get() : main.info.namedGames.common.get())
+        assert task.inputFile.get() == (enabled ? (finalPart == 'CLIENT' ? preview.strippedGames.client.get() : preview.strippedGames.common.get()) : primaryTask.outputFile.get())
+        assert task.classpath.files.containsAll((games - task.inputFile.get())*.asFile)
+        def named = finalPart == 'CLIENT' ? main.info.namedGames.client.get() : main.info.namedGames.common.get()
+        assert task.outputFile.get().asFile.name == named.asFile.name.replace('.jar', '-sources.jar')
+        assert tasks.names.toSet() == taskNames + ['verifyComposeLateInputs']
+        file('compose-late-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([primary:finalPart, side:finalSide, enabled:enabled,
+            games:games*.asFile*.path, operations:operations*.path, source:task.inputFile.get().asFile.path,
+            libraries:task.classpath.files*.path, primaryTask:primaryTask.path, otherTask:otherTask.path,
+            preparation:consumption.preparation.buildDependencies.getDependencies(null)*.path.sort(), graph:gradle.taskGraph.allTasks*.path]))
+        println "VERIFIED_COMPOSE_LATE $finalPart $finalSide $enabled"
+    }
+}

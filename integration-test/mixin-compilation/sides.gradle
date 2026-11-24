@@ -1,0 +1,108 @@
+import earth.terrarium.cloche.target.compilation.GamePart
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.ClochePlugin
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+group = 'probe'
+version = '1'
+apply plugin: ClochePlugin
+cloche.metadata.modId.set('sides_probe')
+// Exercise the ordinary DSL and its existing default common/test registration too.
+def split = cloche.fabric('split') { }
+split.minecraftVersion.set('1.20.1'); split.loaderVersion.set('0.16.0')
+split.data.configure { }
+split.getTest().configure { }
+split.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+def included = cloche.fabric('included') { }
+included.minecraftVersion.set('1.20.1'); included.loaderVersion.set('0.16.0'); included.includedClient()
+included.data.configure { }
+included.getTest().configure { }
+def unsplit = cloche.fabric('unsplit') { }
+unsplit.minecraftVersion.set('1.20.1'); unsplit.loaderVersion.set('0.16.0')
+def joined = cloche.forge('joined') { }
+joined.minecraftVersion.set('1.20.1'); joined.loaderVersion.set('47.0.0')
+joined.data.configure { }
+joined.getTest().configure { }
+def neo = cloche.neoforge('neo') { }
+neo.minecraftVersion.set('1.20.1'); neo.loaderVersion.set('47.0.0')
+// A late change on split must not affect any other target.
+def splitEnabled = providers.gradleProperty('r2SplitOn').isPresent()
+split.mixinPreapplication.set(!splitEnabled)
+split.mixinPreapplication.set(splitEnabled)
+def expected = [
+    (split.main):'SERVER', (split.data.value.get()):'SERVER', (split.getTest().value.get()):'SERVER',
+    (split.client.value.get()):'CLIENT', (split.client.value.get().data.value.get()):'CLIENT', (split.client.value.get().getTest().value.get()):'CLIENT',
+    (included.main):'CLIENT', (included.data.value.get()):'CLIENT', (included.getTest().value.get()):'CLIENT',
+    (unsplit.main):'CLIENT', (joined.main):'CLIENT', (joined.data.value.get()):'CLIENT', (joined.getTest().value.get()):'CLIENT', (neo.main):'CLIENT'
+]
+tasks.register('verifySides') {
+    doLast {
+        def observation = []
+        expected.each { c, side ->
+            def operations = c.preapplyMixinsTasks.get()*.get()
+            def operation = operations.first()
+            assert operations*.side*.get().every { it == side }
+            assert operations.size() == ((c.target == joined || c.target == neo || side == 'SERVER') ? 1 : 2)
+            assert operation.side.get() == side
+            assert c.preapplicationSide.get() == side
+            assert c.target.mixinPreapplication.get() == (c.target != split || splitEnabled)
+            def joinedShape = c.target == joined || c.target == neo
+            def primaryPart = joinedShape ? GamePart.JOINED : (c.target == included || c.name.startsWith('client') ? GamePart.CLIENT : GamePart.COMMON)
+            assert joinedShape ? c.info.namedGames instanceof earth.terrarium.cloche.target.compilation.GameShards.Joined : c.info.namedGames instanceof earth.terrarium.cloche.target.compilation.GameShards.Split
+            assert c.info.primaryGame.get() == primaryPart
+            assert c.info.extraClasspathFiles.present
+            def runtimeExtras = c.runtimeExtraClasspathFiles.get()
+            if (c.name.startsWith('client')) {
+                assert runtimeExtras == [split.main.finalMinecraftFile.get()]
+                assert c.info.runtimeExtraMinecraftFiles.isEmpty()
+            } else if (c.target == included) {
+                assert runtimeExtras.size() == 1
+                assert project.files(c.runtimeExtraClasspathFiles).buildDependencies.getDependencies(null)*.name == ["accessWidenIncluded${c.featureName?.capitalize() ?: ''}CommonMinecraft".toString()]
+            } else assert runtimeExtras.empty
+            if (c.target == unsplit) assert runtimeExtras.empty && primaryPart == GamePart.COMMON && side == 'CLIENT'
+            assert c.finalMinecraftFile.get().asFile.parentFile == new File(c.target.outputDirectory.get().asFile, c.name.replace(':', '/'))
+            if (c.target == split && !splitEnabled) assert selectedGame(c) == c.finalMinecraftFile.get()
+            if (c.target == joined || c.target == neo) assert operation.inputFile.get() == c.finalMinecraftFile.get()
+            def sourcesProducers = project.files(c.sources).buildDependencies.getDependencies(null)
+            assert sourcesProducers.size() == 1
+            def decompile = sourcesProducers.first()
+            assert decompile instanceof Decompile
+            def libraries = decompile.classpath.from.toList()
+            assert libraries.size() == 1
+            def selectedLibraries = libraries.first().from.toList()
+            assert selectedLibraries.contains(c.compileConfiguration)
+            assert selectedLibraries.size() == 3
+            def libraryProvider = selectedLibraries.last()
+            def actualLibraries = libraryProvider.get()
+            if (c.target.mixinPreapplication.get()) {
+                assert actualLibraries.from.size() == 1
+                actualLibraries = actualLibraries.from.first().get()
+            }
+            if (c.target.mixinPreapplication.get() && side == 'CLIENT') {
+                assert actualLibraries.is(c.info.preapplicationLibraries)
+            } else assert actualLibraries.from.empty
+            def inputProducers = project.files(decompile.inputFile).buildDependencies.getDependencies(null)
+            assert decompile.taskDependencies.getDependencies(decompile).containsAll(operations) == c.target.mixinPreapplication.get()
+            if (c.target == split && !splitEnabled) {
+                assert inputProducers.every { !(it instanceof Mixin) && !it.name.startsWith('join') }
+                assert decompile.inputFile.get() == c.finalMinecraftFile.get()
+            }
+            observation.add([target:c.target.name, compilation:c.name, side:side, enabled:c.target.mixinPreapplication.get(), task:operation.path,
+                primary:primaryPart.key, extras:runtimeExtras*.asFile*.path,
+                sourcesProducer:decompile.path, inputProducers:inputProducers*.path.sort(), classpathOwners:decompile.classpath.from*.toString()])
+        }
+        assert observation*.task.toSet().size() == expected.size()
+        file('sides.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+        println 'VERIFIED_SIDES ' + expected.size()
+    }
+}

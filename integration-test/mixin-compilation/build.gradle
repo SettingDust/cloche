@@ -1,0 +1,283 @@
+import earth.terrarium.cloche.ClochePlugin
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftCommon
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftClient
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import earth.terrarium.cloche.target.compilation.MixinPreapplicationKt
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.tasks.compile.JavaCompile
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+def metadata = new Properties()
+file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+def pluginFiles = metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)).collect { file(it) }
+assert pluginFiles.count { it.name.startsWith('minecraft-codev-mixins-') } == 1
+ext.pluginFiles = pluginFiles
+// Tiny game and version metadata are fixture inputs. No Mixin/notification/clean output is pre-generated.
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+
+subprojects {
+    apply plugin: 'java-library'
+    group = 'probe'
+    version = '1'
+}
+project(':populated') {
+    tasks.named('compileJava') { options.release = 17 }
+}
+
+group = 'probe'
+version = '1'
+apply plugin: ClochePlugin
+apply plugin: 'org.jetbrains.kotlin.jvm'
+apply from: 'artifact-identity.gradle'
+repositories {
+    maven { url = uri('repository') }
+    mavenCentral()
+}
+
+def scenario = providers.gradleProperty('scenario').getOrElse('on')
+def direct = scenario == 'direct'
+def gameVersion = direct ? '26.1' : '1.20.1'
+def target = cloche.singleTarget { c -> c.fabric { t ->
+    t.minecraftVersion.set(gameVersion)
+    t.loaderVersion.set('0.16.0')
+    if (scenario == 'on') t.mixinPreapplication.set(false)
+    if (scenario == 'off') t.mixinPreapplication.set(true)
+    t.accessWideners.from(file('input/game.accesswidener'))
+    t.dependencies { d ->
+        if (scenario == 'file') {
+            d.modCompileOnly.add(project.files('repository/probe/ref/1/ref-1.jar'))
+            d.modImplementation.add(project.files('repository/probe/plain/1/plain-1.jar', 'repository/probe/transitive/1/transitive-1.jar'))
+        } else {
+            d.modCompileOnly.add('probe:ref:1')
+            d.modImplementation.add('probe:plain:1')
+        }
+        if (providers.gradleProperty('classifierProbe').isPresent()) d.implementation.add('probe:ref:1:extra')
+        d.modRuntimeOnly.add('probe:runtime:1')
+        d.implementation.add('ordinary:ref:1')
+        d.implementation.add(project(':populated'))
+        d.implementation.add(project(':empty'))
+        d.implementation.add(files(pluginFiles.find { it.name.startsWith('kotlin-stdlib-') }))
+    }
+} }
+cloche.metadata.modId.set('compile_probe')
+target.main.mixins.from(file('input/own.json'))
+// Final DSL changes deliberately happen after all production registrations.
+if (scenario == 'on') target.mixinPreapplication.set(true)
+if (scenario == 'off') target.mixinPreapplication.set(false)
+
+// Replace upstream Minecraft download inputs only; AW, remap, include, Mixin, both Strip paths and consumers are real.
+configurations.matching { it.name.endsWith('MinecraftLibraries') || it.name == 'commonMinecraftLibraries' || it.name == 'clientMinecraftLibraries' }.configureEach {
+    dependencies.clear()
+}
+configurations.named('api') { dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' } }
+configurations.named('mappings') {
+    dependencies.clear()
+    dependencies.add(project.dependencies.create(project.files('input/mappings.tiny')))
+}
+// HEAD keeps this auxiliary runtime dependency when no namespace exists; make its ZIP non-NO-SOURCE.
+if (direct) tasks.named('generateMappingsArtifact') { from('input/auxiliary.txt') }
+tasks.withType(ResolveMinecraftCommon).configureEach {
+    actions.clear()
+    output.set(layout.projectDirectory.file('input/common.jar'))
+}
+tasks.withType(ResolveMinecraftClient).configureEach {
+    actions.clear()
+    output.set(layout.projectDirectory.file('input/client.jar'))
+}
+configurations.matching { it.name.endsWith('AnnotationProcessor') || it.name == 'annotationProcessor' }.configureEach { dependencies.clear() }
+tasks.withType(JavaCompile).configureEach { options.release.set(17); options.compilerArgs.add('-proc:none'); options.compilerArgumentProviders.clear() }
+tasks.withType(KotlinCompile).configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    // HEAD's remapper metadata writer supports Kotlin metadata through 2.2.
+    compilerOptions.languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
+}
+
+// Private source and implementation observations are deliberately tied to the real task/consumer.
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def compilation = target.main
+def C = configurations.named('compileClasspath')
+// Same inherited dependency graph and pre-Mixin requests, including native project variants.
+def baseline = configurations.resolvable('originalCompileBaseline') {
+    extendsFrom(C.get())
+    C.get().attributes.keySet().findAll { it != state }.each { a -> attributes.attribute(a, C.get().attributes.getAttribute(a)) }
+}
+def raw = C.get().incoming.artifactView {
+    componentFilter { !(it instanceof ProjectComponentIdentifier) }
+    attributes.attribute(state, 'raw')
+}
+def inherited = C.get().incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+def task = tasks.named('preapplyCommonMixins', Mixin)
+def operations = { compilation.preapplyMixinsTasks.get()*.get() }
+gradle.taskGraph.whenReady { graph ->
+    println 'GRAPH ' + graph.allTasks*.path
+    println 'ENV Gradle=' + gradle.gradleVersion + ' JVM=' + System.getProperty('java.version') + ' JavaHome=' + System.getProperty('java.home') + ' Installation=' + gradle.gradleHomeDir + ' Home=' + gradle.gradleUserHomeDir
+    def environment = new Properties()
+    file('environment.properties').withInputStream { environment.load(it) }
+    assert new File(System.getProperty('java.home')).canonicalFile == new File(environment.workerJavaHome).canonicalFile
+    assert gradle.gradleVersion == environment.gradleVersion
+    assert gradle.gradleUserHomeDir.canonicalFile == new File(environment.privateHome).canonicalFile
+    println 'VERIFIED_INHERITED_ENV'
+}
+tasks.withType(Mixin).configureEach {
+    doFirst {
+        [Mixin, net.msrandom.minecraftcodev.mixins.StripMixins, Class.forName('net.msrandom.minecraftcodev.mixins.ProduceMixinsKt'), Class.forName('net.msrandom.minecraftcodev.mixins.MixinRuntimeFailure')].each { type ->
+            println 'CODE_SOURCE ' + type.name + ' ' + type.protectionDomain.codeSource.location
+            assert new File(type.protectionDomain.codeSource.location.toURI()).bytes == pluginFiles.find { it.name.startsWith('minecraft-codev-mixins-') }.bytes
+        }
+        assert net.msrandom.minecraftcodev.mixins.StripMixins.Parameters.getMethod('getRemovalsFile').returnType == org.gradle.api.file.ConfigurableFileCollection
+        println 'GETTER_DESCRIPTOR ()Lorg/gradle/api/file/ConfigurableFileCollection;'
+        assert implementationClasspath.files.count { it.name.startsWith('minecraft-codev-mixins-') } == 1
+        assert implementationClasspath.files.any { it.name == 'sponge-mixin-0.15.0+mixin.0.8.7.jar' }
+        println 'LOCAL_SOURCE_MATCH true'
+        println 'IMPLEMENTATION ' + implementationClasspath.files
+        println 'SOURCES ' + mixinFiles.files
+        println 'PRODUCER_CLASSPATH ' + classpath.files
+        println 'SIDE ' + side.get()
+        println 'MAPPING ' + [mappingFile.orNull, sourceNamespace.orNull, targetNamespace.orNull, refmapContext.orNull]
+    }
+}
+
+def entries = { File f ->
+    new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name): z.getInputStream(e).bytes] } }
+}
+def deps = { files -> files.buildDependencies.getDependencies(null)*.path.sort() }
+def artifact = { a -> [id:a.id.toString(), component:a.id.componentIdentifier.toString(), variant:a.variant.displayName,
+    attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] }, file:a.file.absolutePath, exists:a.file.exists()] }
+
+// Each runs alone in a fresh fixture and consumes only the named public/native view.
+[C:C.get(), View:inherited.files, SourceSet:sourceSets.main.compileClasspath].each { label, files ->
+    tasks.register("verify$label") { t ->
+        inputs.files(files)
+        MixinPreapplicationKt.dependOnPreapplication(compilation, t)
+        doLast {
+            assert operations().every { it.appliedMixins.get().asFile.exists() && it.outputFile.get().asFile.exists() }
+            def artifacts = C.get().incoming.artifacts.artifacts
+            task.get().mixinFiles.each { original ->
+                def input = raw.artifacts.artifacts.find { it.file == original }
+                def clean = matchCleanArtifact(input, artifacts).file
+                def configName = original.name.split('-1')[0] + '.json'
+                def config = new JsonSlurper().parseText(new String(entries(clean)[configName], 'UTF-8'))
+                assert config.mixins == []
+            }
+            println "VERIFIED_PROBE $label"
+        }
+    }
+}
+
+tasks.register('verifyCompile') {
+    dependsOn 'compileJava', 'compileKotlin'
+    dependsOn sourceSets.main.runtimeClasspath
+    dependsOn 'includeJar'
+    doLast {
+        def enabled = target.mixinPreapplication.get()
+        def rawArtifacts = raw.artifacts.artifacts
+        def cleanArtifacts = C.get().incoming.artifacts.artifacts
+        def observation = [scenario:scenario, enabled:enabled, state:C.get().attributes.getAttribute(state),
+            baseline:baseline.get().incoming.artifacts.artifacts.collect(artifact), baselineDeps:deps(baseline.get()),
+            raw:rawArtifacts.collect(artifact), compile:cleanArtifacts.collect(artifact),
+            Cdeps:deps(C.get()), viewDeps:deps(inherited.files), sourceSetDeps:deps(sourceSets.main.compileClasspath),
+            sourceSet:sourceSets.main.compileClasspath.files*.absolutePath,
+            runtime:sourceSets.main.runtimeClasspath.files*.absolutePath,
+            publication:tasks.named('remapJar').get().classpath.files*.absolutePath]
+        file('observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+        assert cleanArtifacts.size() == rawArtifacts.size() + 2 // two native project class directories
+        assert cleanArtifacts.findAll { it.id.componentIdentifier instanceof ProjectComponentIdentifier }.every { it.file.path.replace('\\', '/').endsWith('classes/java/main') }
+        assert !project(':empty').file('build/classes/java/main').exists()
+        assert cleanArtifacts.every { !it.file.name.startsWith('runtime-') }
+        def rawOrdinary = rawArtifacts.find { it.id.componentIdentifier.toString() == 'ordinary:ref:1' }.file
+        assert cleanArtifacts.find { it.id.componentIdentifier.toString() == 'ordinary:ref:1' }.file == rawOrdinary
+        if (enabled) {
+            assert C.get().attributes.getAttribute(state) != null
+            assert task.get().mixinFiles.files*.name.toSet() == (direct ? ['ref-1.jar', 'plain-1.jar', 'transitive-1.jar'] : ['ref-1-named.jar', 'plain-1-named.jar', 'transitive-1-named.jar']).toSet()
+            task.get().mixinFiles.each { original ->
+                def inputArtifact = rawArtifacts.find { it.file == original }
+                assert inputArtifact != null
+                def clean = matchCleanArtifact(inputArtifact, cleanArtifacts)
+                assert clean != null : original
+                def configName = original.name.split('-1')[0] + '.json'
+                def before = entries(original)
+                def after = entries(clean.file)
+                assert after.keySet() == before.keySet()
+                before.each { path, bytes -> if (path != configName) assert Arrays.equals(bytes, after[path]) : path }
+                def json = new JsonSlurper().parseText(new String(after[configName], 'UTF-8'))
+                assert json.mixins == []
+                assert (json.client ?: []) == []
+                assert entries(clean.file)['keep.txt'] != null
+                assert entries(original)[configName] != null
+                if (configName == 'ref.json') assert json.server == ['Unapplied']
+                if (configName == 'plain.json') {
+                    assert !entries(original).containsKey('META-INF/jars/child.jar')
+                    assert entries(file('repository/probe/plain/1/plain-1.jar')).containsKey('META-INF/jars/child.jar')
+                }
+            }
+            def games = compilation.compileMinecraftFiles.get()*.asFile
+            assert games.size() == 2
+            assert operations()*.side*.get() == ['CLIENT', 'CLIENT']
+            def notices = operations().collect { new JsonSlurper().parse(it.appliedMixins.get().asFile) }
+            assert notices[0] != notices[1]
+            games.eachWithIndex { game, index ->
+                def produced = entries(operations()[1-index].outputFile.get().asFile)
+                def content = entries(game)
+                assert content.keySet() == produced.keySet()
+                produced.each { path, bytes ->
+                    def expected = bytes
+                    if (notices.any { it.containsKey(path) }) {
+                        def json = new JsonSlurper().parseText(new String(bytes, 'UTF-8'))
+                        notices.each { notice -> ['mixins','client','server'].each { kind ->
+                            if (json[kind] != null) json[kind] = json[kind].findAll { !(it in (notice[path] ?: [])) }
+                        } }
+                        assert new JsonSlurper().parseText(new String(content[path], 'UTF-8')) == json
+                    } else assert Arrays.equals(bytes, content[path]) : path
+                }
+                assert content[index == 0 ? 'client-only.txt' : 'common-only.txt'] != null
+                assert new String(content['duplicate.txt']) == (index == 0 ? 'client' : 'common')
+                assert observation.sourceSet.contains(game.absolutePath)
+                assert !observation.publication.contains(game.absolutePath)
+                assert !observation.runtime.contains(game.absolutePath)
+            }
+            assert games.collect { observation.sourceSet.indexOf(it.absolutePath) } == games.collect { observation.sourceSet.indexOf(it.absolutePath) }.sort(false)
+            assert !observation.sourceSet.contains(compilation.finalMinecraftFile.get().asFile.absolutePath)
+            assert compilation.runtimeExtraClasspathFiles.get().every { !observation.sourceSet.contains(it.asFile.absolutePath) }
+            observation.games = games*.absolutePath
+            observation.operations = operations().collect { [task:it.path, produced:it.outputFile.get().asFile.absolutePath, notification:it.appliedMixins.get().asFile.absolutePath, record:new JsonSlurper().parse(it.appliedMixins.get().asFile)] }
+            file('observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+            new URLClassLoader((games + cleanArtifacts*.file).collect { it.toURI().toURL() } as URL[], (ClassLoader)null).withCloseable { loader ->
+                assert loader.loadClass('shared.Duplicate').getMethod('side').invoke(null) == 'client'
+                def gameClass = loader.loadClass('named.Game')
+                def constructor = gameClass.getDeclaredConstructor()
+                constructor.setAccessible(true)
+                def instance = constructor.newInstance()
+                assert loader.loadClass('probe.Ref').getMethod('callRef').invoke(instance) == 11
+                assert loader.loadClass('probe.Plain').getMethod('callPlain').invoke(instance) == 22
+                assert loader.loadClass('probe.Client').getMethod('callClient').invoke(loader.loadClass('named.ClientGame').getDeclaredConstructor().newInstance()) == 33
+            }
+            assert !observation.runtime.contains(task.get().mixinFiles.files.find { it.name.startsWith('ref-') }.absolutePath)
+            assert observation.runtime.any { new File(it).name.startsWith('runtime-') }
+            assert !observation.runtime.any { it.contains('mixinStripped') }
+            assert !observation.publication.any { it.contains('mixinStripped') }
+            println 'CLEAN_GAMES ' + games
+        } else {
+            assert C.get().attributes.getAttribute(state) == null
+            assert observation.compile.toSet() == observation.baseline.toSet()
+            assert observation.Cdeps == observation.baselineDeps
+            assert sourceSets.main.compileClasspath.files.toSet() == (baseline.get().files + [compilation.finalMinecraftFile.get().asFile] + compilation.runtimeExtraClasspathFiles.get()*.asFile).toSet()
+            assert !gradle.taskGraph.allTasks.any { it instanceof Mixin || it.name.startsWith('join') }
+            assert !file('build/mixin/preapplyMixins/removals.json').exists()
+            assert rawArtifacts*.file.toSet() == cleanArtifacts.findAll { !(it.id.componentIdentifier instanceof ProjectComponentIdentifier) }*.file.toSet()
+        }
+        println 'VERIFIED_COMPILE ' + scenario
+    }
+}

@@ -3,6 +3,7 @@ package earth.terrarium.cloche.target.fabric
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.target.compilation.FabricSecondarySourceSets
 import earth.terrarium.cloche.target.LazyConfigurableInternal
+import earth.terrarium.cloche.target.compilation.GamePart
 import earth.terrarium.cloche.target.compilation.TargetCompilation
 import earth.terrarium.cloche.target.lazyConfigurable
 import org.gradle.kotlin.dsl.newInstance
@@ -21,12 +22,14 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
                 ClochePlugin.CLIENT_DATA_COMPILATION_NAME,
                 target,
                 info.intermediaryMinecraftClasspath,
-                info.namedMinecraftFile,
-                info.clientMinecraftFile,
-                info.finalCommonJar,
+                info.splitNamedGames,
+                info.runtimeExtraMinecraftFiles,
+                info.extraClasspathFiles,
                 data = true,
                 test = false,
-                client = project.provider { true },
+                primaryGame = project.provider { GamePart.CLIENT },
+                preapplicationSide = info.preapplicationSide,
+                preapplicationLibraries = info.preapplicationLibraries,
             ),
         )
 
@@ -45,12 +48,14 @@ internal abstract class FabricClientSecondarySourceSets @Inject constructor(info
                 ClochePlugin.CLIENT_TEST_COMPILATION_NAME,
                 target,
                 info.intermediaryMinecraftClasspath,
-                info.commonMinecraftFile,
-                info.clientMinecraftFile,
-                info.finalCommonJar,
+                info.splitNamedGames,
+                info.runtimeExtraMinecraftFiles,
+                info.extraClasspathFiles,
                 data = false,
                 test = true,
-                client = project.provider { true },
+                primaryGame = project.provider { GamePart.CLIENT },
+                preapplicationSide = info.preapplicationSide,
+                preapplicationLibraries = info.preapplicationLibraries,
             ),
         )
 

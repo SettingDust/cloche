@@ -1,0 +1,47 @@
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.compilation.TargetCompilationKt
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import groovy.json.JsonSlurper
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+def t = cloche.singleTarget { c -> c.fabric { } }
+def c = t.main
+def previewGetter = c.class.methods.find { it.name.startsWith('getMixinPreview$') }
+assert previewGetter != null
+tasks.register('verifyPreviewContract') {
+    dependsOn 'verifyCompile', 'verifySources'
+    doLast {
+        def preview = previewGetter.invoke(c)
+        assert preview.tasks instanceof GameShards.Split
+        assert preview.strippedGames instanceof GameShards.Split
+        def expectedTasks = [preview.tasks.common, preview.tasks.client]
+        assert preview.operations.get() == expectedTasks
+        assert preview.operations.is(c.preapplyMixinsTasks)
+        def expectedRecords = expectedTasks.collect { it.get().appliedMixins.get() }
+        assert preview.records.get() == expectedRecords
+        if (t.mixinPreapplication.get()) {
+            assert expectedRecords*.asFile*.exists() == [true, true]
+            def records = expectedRecords.collect { new JsonSlurper().parse(it.asFile) }
+            assert records[0] != records[1]
+            assert expectedRecords[0].asFile != expectedRecords[1].asFile
+            assert c.compileMinecraftFiles.get() == [preview.strippedGames.client.get(), preview.strippedGames.common.get()]
+        }
+        def beforeTasks = tasks.names.toSet()
+        def beforeConfigurations = configurations.names.toSet()
+        def retained = TargetCompilationKt.registerCompilationTransformations(c, c.info)
+        def filesGetter = c.class.classLoader.loadClass('earth.terrarium.cloche.target.compilation.TargetCompilation').getDeclaredMethod('getSetupFiles')
+        filesGetter.setAccessible(true)
+        assert retained.is(filesGetter.invoke(c))
+        assert retained.compileMinecraftFiles.is(c.compileMinecraftFiles)
+        assert retained.runtimeExtraFiles.is(c.runtimeExtraClasspathFiles)
+        assert retained.preapplyMixinsTasks.is(preview.operations)
+        assert tasks.names.toSet() == beforeTasks
+        assert configurations.names.toSet() == beforeConfigurations
+        println 'VERIFIED_PREVIEW_PAIRED_RECORDS_REAL_CONSUMPTION'
+    }
+}

@@ -1,0 +1,16 @@
+import groovy.json.JsonOutput
+
+// Record each real request, including failed preparation and Tooling requests, in its own fixture.
+def started = System.nanoTime()
+def startTime = java.time.Instant.now().toString()
+def invocation = UUID.randomUUID().toString()
+def observation = new File(gradle.startParameter.currentDir, 'invocations.jsonl')
+def record = { values -> observation << JsonOutput.toJson([invocation:invocation] + values) + '\n' }
+record([event:'start', time:startTime, tasks:gradle.startParameter.taskNames,
+    project:gradle.startParameter.currentDir.canonicalPath, home:gradle.gradleUserHomeDir.canonicalPath,
+    gradle:gradle.gradleVersion, java:System.getProperty('java.version'),
+    offline:gradle.startParameter.offline, configurationCache:gradle.startParameter.configurationCacheRequested])
+gradle.buildFinished { result ->
+    record([event:'finish', time:java.time.Instant.now().toString(), nanos:System.nanoTime() - started,
+        failed:result.failure != null])
+}

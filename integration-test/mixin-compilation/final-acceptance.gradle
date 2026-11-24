@@ -1,0 +1,106 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def target = cloche.singleTarget { c -> c.fabric { } }
+def compilation = target.main
+def operation = tasks.named('preapplyCommonMixins', Mixin)
+def mode = providers.gradleProperty('r5Mode').getOrElse('normal')
+def fault = providers.gradleProperty('r5Fault').getOrElse('none')
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+if (providers.gradleProperty('r5Include').isPresent()) target.dependencies { d -> d.include.add('ordinary:included:1') }
+// Each input is a real existing Task API property, not a production test hook.
+afterEvaluate {
+    tasks.withType(Mixin).configureEach {
+        inputs.property('r5Fault', fault)
+        if (mode == 'context' || mode == 'context-missing') refmapContext.set(mode == 'context' ? 'chosen' : 'r5_missing_context')
+        if (mode == 'side') side.set('SERVER')
+        if (mode == 'mapping') sourceNamespace.set('obf')
+        doLast {
+            def notice = new JsonSlurper().parse(appliedMixins.get().asFile)
+            if (fault == 'source') notice['source-broken.json'] = ['Broken']
+            if (fault == 'target') notice['target-broken.json'] = ['Broken']
+            if (fault == 'notice') notice['r5-absent.json'] = ['Absent']
+            if (fault != 'none') appliedMixins.get().asFile.text = JsonOutput.toJson(notice)
+            println 'R5_PRODUCED ' + [path, outputFile.get(), appliedMixins.get(), appliedMixins.get().asFile.text]
+        }
+    }
+}
+def C = compilation.compileConfiguration.get()
+def view = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+def sourceSet = compilation.sourceSet
+// Record collection dependency discovery before execution, separately from the consumer graph.
+def dependencies = [C:deps(C), view:deps(view.files), sourceSet:deps(sourceSet.compileClasspath), game:deps(compilation.compileMinecraftFiles), notice:deps(operation.flatMap { it.appliedMixins })]
+gradle.taskGraph.whenReady { graph ->
+    println 'R5_COLLECTION_DEPENDENCIES ' + JsonOutput.toJson(dependencies)
+    println 'R5_GRAPH ' + graph.allTasks*.path
+}
+tasks.register('verifyR5') {
+    if (providers.gradleProperty('r5Include').isPresent()) dependsOn 'includeJar'
+    inputs.files(C)
+    earth.terrarium.cloche.target.compilation.MixinPreapplicationKt.dependOnPreapplication(compilation, it)
+    doLast {
+        def games = compilation.compileMinecraftFiles.get()*.asFile
+        def game = selectedGame(compilation).asFile
+        def records = compilation.preapplyMixinsTasks.get().collect { new JsonSlurper().parse(it.get().appliedMixins.get().asFile) }
+        def input = operation.get().inputFile.get().asFile
+        def notice = operation.get().appliedMixins.get().asFile
+        def raw = C.incoming.artifactView {
+            componentFilter { !(it instanceof ProjectComponentIdentifier) }
+            attributes.attribute(org.gradle.api.attributes.Attribute.of('earth.terrarium.cloche.mixinPreapplication', String), 'raw')
+        }.artifacts.artifacts
+        def artifacts = C.incoming.artifacts.artifacts
+        def observed = [mode:mode, fault:fault, dependencies:dependencies, graph:gradle.taskGraph.allTasks*.path,
+            game:game.absolutePath, games:games*.absolutePath, records:records, input:input.absolutePath, P:operation.get().outputFile.get().asFile.absolutePath, N:notice.absolutePath,
+            notification:new JsonSlurper().parse(notice), side:operation.get().side.get(), mapping:[operation.get().sourceNamespace.orNull, operation.get().targetNamespace.orNull, operation.get().refmapContext.orNull],
+            sources:operation.get().mixinFiles.files*.absolutePath,
+            compile:artifacts.collect { a -> [id:a.id.toString(), component:a.id.componentIdentifier.toString(), variant:a.variant.displayName, file:a.file.absolutePath] }]
+        assert game.isFile() && notice.isFile()
+        def full = entries(operation.get().outputFile.get().asFile)
+        def stripped = entries(game)
+        assert full.keySet() == stripped.keySet()
+        full.each { path, bytes -> if (!records.any { it.containsKey(path) }) assert Arrays.equals(bytes, stripped[path]) : path }
+        if (!(mode in ['empty', 'side'])) {
+            def config = new JsonSlurper().parseText(new String(entries(game)['ref.json'], 'UTF-8'))
+            assert config.mixins == ['Unapplied']
+        }
+        operation.get().mixinFiles.each { original ->
+            def a = raw.find { it.file == original }
+            def clean = artifacts.find { it.id.componentIdentifier == a.id.componentIdentifier && it.variant.displayName == a.variant.displayName }.file
+            assert clean != original && clean.isFile()
+            def before = entries(original); def after = entries(clean)
+            assert before.keySet() == after.keySet()
+            before.each { path, bytes -> if (!records.any { it.containsKey(path) }) assert Arrays.equals(bytes, after[path]) : path }
+        }
+        if (mode == 'context') {
+            def urls = (games + raw*.file).collect { it.toURI().toURL() } as URL[]
+            new URLClassLoader(urls, (ClassLoader)null).withCloseable { loader ->
+                def type = loader.loadClass('named.Game')
+                def constructor = type.getDeclaredConstructor()
+                constructor.accessible = true
+                assert type.getMethod('callRef').invoke(constructor.newInstance()) == 11
+            }
+            println 'R5_CONTEXT_REAL_DISPATCH 11'
+        }
+        if (mode == 'empty') assert observed.notification == [:]
+        assert !project(':empty').file('build/classes/java/main').exists()
+        if (providers.gradleProperty('r5Include').isPresent()) {
+            def included = tasks.named('includeJar').get().archiveFile.get().asFile
+            def content = entries(included)
+            assert content.keySet().any { it.startsWith('META-INF/jars/') && it.endsWith('.jar') }
+            assert entries(file('repository/ordinary/included/1/included-1.jar')).containsKey('included.txt')
+        }
+        file('r5-observation-' + mode + '.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observed))
+        println 'VERIFIED_R5 ' + mode
+    }
+}

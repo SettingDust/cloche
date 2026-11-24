@@ -20,15 +20,20 @@ import org.gradle.api.Action
 import org.gradle.api.Buildable
 import org.gradle.api.DomainObjectCollection
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.artifacts.ArtifactView
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.dsl.Dependencies
 import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.file.Directory
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.RegularFile
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.SourceSet
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.kotlin.dsl.domainObjectSet
 import org.gradle.kotlin.dsl.named
@@ -52,6 +57,14 @@ internal fun getNonProjectArtifacts(configuration: Provider<out Configuration>):
         }
     }
 }
+
+internal fun getRawNonProjectArtifacts(configuration: Provider<out Configuration>): Provider<ArtifactView> =
+    configuration.map {
+        it.incoming.artifactView {
+            componentFilter { it !is ProjectComponentIdentifier }
+            attributes.attribute(MIXIN_STATE_ATTRIBUTE, RAW_MIXIN_STATE)
+        }
+    }
 
 val SourceSet.localRuntimeConfigurationName
     get() = lowerCamelCaseGradleName(takeUnless(SourceSet::isMain)?.name, "localRuntime")
@@ -208,36 +221,30 @@ internal fun Project.configureSourceSet(
         val compilationDirectory =
             project.layout.projectDirectory.dir("src").optionalDir(target.namePath).dir(compilation.namePath)
 
-        sourceSet.java.srcDir(compilationDirectory.dir("java"))
-        sourceSet.resources.srcDir(compilationDirectory.dir("resources"))
-
-        plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
-            val kotlin = (sourceSet.extensions.getByName("kotlin") as SourceDirectorySet)
-
-            kotlin.srcDir(compilationDirectory.dir("kotlin"))
-        }
-
-        // TODO Groovy + Scala?
+        configureSourceSetDirectories(sourceSet, compilationDirectory)
     }
 
-    val syncTask = tasks.named(IDE_SYNC_TASK_NAME) {
-        dependsOn(getRelevantSyncArtifacts(sourceSet.compileClasspathConfigurationName))
-
-        if (compilation is TargetCompilation<*>) {
-            dependsOn(compilation.finalMinecraftFile)
-            dependsOn(compilation.info.extraClasspathFiles)
-            dependsOn(getRelevantSyncArtifacts(sourceSet.runtimeClasspathConfigurationName))
-        }
+    val compileArtifacts = if (compilation is TargetCompilation<*>) {
+        compilation.compilationConsumption.artifacts
+    } else {
+        getNonProjectArtifacts(configurations.named(sourceSet.compileClasspathConfigurationName))
     }
+    val compileFiles = files(compileArtifacts.map { it.files })
+    val syncTask = registerSourceSetSync(compileFiles)
 
     if (compilation is TargetCompilation<*>) {
-        withIdeaModel {
-            syncTask.configure {
-                if (it.module.isDownloadSources) {
-                    dependsOn(compilation.sources)
-                }
-            }
-        }
+        val consumption = compilation.compilationConsumption
+        configureMinecraftSync(
+            syncTask,
+            files(consumption.games),
+            files(
+                compilation.finalMinecraftFile,
+                compilation.runtimeExtraClasspathFiles,
+                getNonProjectArtifacts(configurations.named(sourceSet.runtimeClasspathConfigurationName)).map { it.files },
+            ),
+            provider { consumption.preparation },
+            compilation.sources,
+        )
     }
 
     if (compilation.isTest) {
@@ -250,8 +257,69 @@ internal fun Project.configureSourceSet(
         target.capabilitySuffix
     }
 
-    val suffix = compilation.capabilitySuffix
+    configureCompilationArchives(
+        tasks.named<Jar>(sourceSet.jarTaskName),
+        project.cloche.intermediateOutputsDirectory,
+        prefix,
+        compilation.capabilitySuffix,
+        (target as? MinecraftTargetInternal)?.modRemapNamespace,
+        if (compilation is TargetCompilation<*>) compilation.includeJarTask!! else null,
+        if (compilation is TargetCompilation<*>) compilation.remapJarTask!! else null,
+    )
+}
 
+internal fun Project.configureSourceSetDirectories(sourceSet: SourceSet, compilationDirectory: Directory) {
+    sourceSet.java.srcDir(compilationDirectory.dir("java"))
+    sourceSet.resources.srcDir(compilationDirectory.dir("resources"))
+
+    plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
+        val kotlin = sourceSet.extensions.getByName("kotlin") as SourceDirectorySet
+        kotlin.srcDir(compilationDirectory.dir("kotlin"))
+    }
+
+    // TODO Groovy + Scala?
+}
+
+internal fun Project.registerSourceSetSync(compileFiles: FileCollection): TaskProvider<Task> =
+    tasks.named(IDE_SYNC_TASK_NAME) {
+        inputs.files(compileFiles)
+        doLast { compileFiles.files }
+    }
+
+internal fun Project.configureMinecraftSync(
+    syncTask: TaskProvider<Task>,
+    gameFiles: FileCollection,
+    runtimeFiles: FileCollection,
+    preparation: Provider<*>,
+    sources: Provider<RegularFile>,
+) {
+    syncTask.configure {
+        inputs.files(gameFiles, runtimeFiles)
+        dependsOn(preparation)
+        doLast {
+            gameFiles.files
+            runtimeFiles.files
+        }
+    }
+
+    withIdeaModel {
+        syncTask.configure {
+            if (it.module.isDownloadSources) {
+                dependsOn(sources)
+            }
+        }
+    }
+}
+
+internal fun configureCompilationArchives(
+    jarTask: TaskProvider<Jar>,
+    intermediateOutputsDirectory: Provider<Directory>,
+    prefix: String?,
+    suffix: Provider<String>,
+    remapNamespace: Provider<String>?,
+    includeJarTask: TaskProvider<out Jar>?,
+    remapJarTask: TaskProvider<out Jar>?,
+) {
     val classifier = if (prefix == null) {
         suffix
     } else {
@@ -260,8 +328,8 @@ internal fun Project.configureSourceSet(
         }.orElse(prefix)
     }
 
-    val devClassifier = if (target is MinecraftTargetInternal) {
-        classifier.orElse("").zip(target.modRemapNamespace) { classifier, namespace ->
+    val devClassifier = if (remapNamespace != null) {
+        classifier.orElse("").zip(remapNamespace) { classifier, namespace ->
             if (namespace.isEmpty()) {
                 classifier.ifEmpty { null }
             } else if (classifier.isNotEmpty()) {
@@ -274,19 +342,14 @@ internal fun Project.configureSourceSet(
         classifier
     }
 
-    tasks.named<Jar>(sourceSet.jarTaskName) {
-        destinationDirectory.set(project.cloche.intermediateOutputsDirectory)
-
+    jarTask.configure {
+        destinationDirectory.set(intermediateOutputsDirectory)
         archiveClassifier.set(devClassifier)
     }
-
-    if (compilation is TargetCompilation<*>) {
-        compilation.includeJarTask!!.configure {
-            archiveClassifier.set(classifier)
-        }
-
-        compilation.remapJarTask!!.configure {
-            archiveClassifier.set(classifier)
-        }
+    includeJarTask?.configure {
+        archiveClassifier.set(classifier)
+    }
+    remapJarTask?.configure {
+        archiveClassifier.set(classifier)
     }
 }

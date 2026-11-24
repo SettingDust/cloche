@@ -1,0 +1,137 @@
+import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.target.compilation.CompilationInternalKt
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.forge.ForgeCompilationInfo
+import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.FileCollectionDependency
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies {
+        classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)))
+    }
+}
+apply plugin: ClochePlugin
+group = 'probe'
+version = '1'
+cloche.metadata.modId.set('joined_assembly')
+def metadata = new Properties()
+file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+def declared = metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)).collect { file(it).canonicalFile }
+[ClochePlugin, ForgeLikeTargetImpl, ForgeCompilationInfo, GameShards].each { type ->
+    def source = new File(type.protectionDomain.codeSource.location.toURI()).canonicalFile
+    assert declared.contains(source) : [type.name, source]
+    println "JOINED_CODE_SOURCE ${type.name} $source"
+}
+def member = { object, prefix -> object.class.methods.find { it.name.startsWith(prefix) }.invoke(object) }
+def local = { c -> configurations.getByName(CompilationInternalKt.getLocalImplementationConfigurationName(c.sourceSet)) }
+def events = []
+def rows = []
+for (loader in ['forge', 'neoforge']) {
+    for (early in [true, false]) {
+        def name = (early ? 'early' : 'late') + loader.capitalize()
+        // No loader version is present while all raw tasks and main are constructed.
+        def t = cloche."$loader"(name) { it.minecraftVersion.set('1.20.1') }
+        def libraries = configurations.getByName(name + 'MinecraftLibraries')
+        def patched = member(t, 'getResolvePatchedMinecraft')
+        def extra = member(t, 'getGenerateClientExtra')
+        def remap = tasks.named('remap' + name.capitalize() + 'MinecraftNamed')
+        def named = t.main.info.namedGames.value
+        def primary = t.main.info.primaryGame
+        def sourceSet = t.main.sourceSet
+        def runtime = configurations.getByName(sourceSet.runtimeClasspathConfigurationName)
+        assert libraries.consistentResolutionSource.is(runtime)
+        assert extra.get().neoforge.get() == (loader == 'neoforge')
+        assert patched.get().neoforge.get() == (loader == 'neoforge')
+        assert local(t.main).extendsFrom.contains(libraries)
+        assert patched.get().libraries.from.contains(libraries)
+        assert patched.get().universal.from.contains(configurations.getByName(name + 'ForgeUniversal'))
+        assert patched.get().patches.from.size() == 1
+        assert patched.get().patches.from.first().get().is(configurations.getByName(sourceSet.name + 'Patches'))
+        assert remap.get().classpath.from.contains(libraries)
+        assert remap.get().mappings.get() == t.loadMappingsTask.get().output.get()
+        t.loaderVersion.set('first')
+        def patchDependencies = configurations.getByName(sourceSet.name + 'Patches').dependencies
+        def mappingDependencies = configurations.getByName(sourceSet.name + 'Mappings').dependencies
+        assert patchDependencies.any { dep -> dep.capabilitySelectors.any { it.toString().contains('moddev-bundle') } }
+        assert mappingDependencies.any { dep -> dep.capabilitySelectors.any { it.toString().contains('moddev-bundle') } }
+        assert libraries.dependencies.any { dep -> dep.capabilitySelectors.any { it.toString().contains('dependencies') } }
+        def check = { c ->
+            assert c.info.namedGames instanceof GameShards.Joined
+            assert c.info.namedGames.is(t.main.info.namedGames)
+            assert c.info.namedGames.value.is(named)
+            assert c.preapplicationSide.is(t.main.preapplicationSide)
+            assert c.generateMetadataTask.get().metadata.get().is(t.metadata)
+            assert c.info.primaryGame.get() == GamePart.JOINED
+            assert c.info.primaryGame.get().name() == 'JOINED'
+            assert c.preapplicationSide.get() == 'CLIENT'
+            assert c.info.side.get().name() == 'client'
+            assert local(c).extendsFrom.contains(libraries)
+            def legacy = member(c, 'getWriteLegacyClasspath').get()
+            assert legacy.classpath.from.size() == (loader == 'forge' ? 3 : 2)
+            assert project.files(legacy.classpath.from.first()).buildDependencies.getDependencies(null).contains(extra.get())
+            assert !legacy.classpath.from.contains(c.compileMinecraftFiles)
+            def implementation = c.dependencyHandler.implementation.dependencies.get().findAll { it instanceof FileCollectionDependency }
+            assert implementation.collectMany { it.files.files }.contains(extra.get().outputFile.get().asFile)
+        }
+        if (early) { t.data.configure { check(it) }; t.getTest().configure { check(it) } }
+        [data:t.data, test:t.getTest()].each { role, lazy ->
+            lazy.onConfigured { c ->
+                assert lazy.value.get().is(c)
+                check(c)
+                events.add(name + ':' + role + ':listener')
+            }
+            lazy.configure { c ->
+                assert events.last() == name + ':' + role + ':listener'
+                events.add(name + ':' + role + ':action')
+            }
+            def value = lazy.value.get()
+            def registered = tasks.names.toSet()
+            lazy.configure { assert it.is(value); events.add(name + ':' + role + ':repeat') }
+            assert tasks.names.toSet() == registered
+            lazy.onConfigured { assert it.is(value); events.add(name + ':' + role + ':immediate') }
+            assert events.last().endsWith(':immediate')
+        }
+        def registered = tasks.names.toSet()
+        def before = named.get()
+        def firstPatched = patched.get().output.get()
+        t.loaderVersion.set('second')
+        assert primary.get().name() == 'JOINED'
+        def dir = t.outputDirectory.get()
+        def namespace = t.minecraftRemapNamespace.get()
+        assert patched.get().output.get() == dir.file("${t.loaderName}-1.20.1-second-${namespace ?: 'named'}.jar")
+        assert extra.get().outputFile.get() == dir.file("${t.loaderName}-1.20.1-second-client-extra.jar")
+        assert remap.get().outputFile.get() == dir.file("${t.loaderName}-1.20.1-second-named.jar")
+        assert named.get() != before && patched.get().output.get() != firstPatched
+        assert project.files(named).buildDependencies.getDependencies(null) == [namespace ? remap.get() : patched.get()].toSet()
+        [t.main, t.data.value.get(), t.getTest().value.get()].each { c ->
+            check(c)
+
+        }
+        // The implementation collection is conditional; legacy keeps its direct producer even when it is empty.
+        t.minecraftVersion.set('26.1')
+        [t.main, t.data.value.get(), t.getTest().value.get()].each { c ->
+            def files = c.dependencyHandler.implementation.dependencies.get().findAll { it instanceof FileCollectionDependency }.collectMany { it.files.files }
+            assert !files.contains(extra.get().outputFile.get().asFile)
+            assert project.files(member(c, 'getWriteLegacyClasspath').get().classpath.from.first()).buildDependencies.getDependencies(null).contains(extra.get())
+        }
+        assert patched.get().output.get().asFile.name.contains('-26.1-second-')
+        assert extra.get().outputFile.get().asFile.name.contains('-26.1-second-')
+        t.minecraftVersion.set('1.20.1')
+        assert tasks.names.toSet() == registered
+        assert t.main.sourceSet.is(sourceSet)
+        assert libraries.consistentResolutionSource.is(runtime)
+        rows.add([loader:loader, early:early, named:before.asFile.path, after:named.get().asFile.path,
+            patched:patched.get().path, extra:extra.get().path, runtime:runtime.name,
+            main:t.main.name, secondaries:[t.data.value.get().name, t.getTest().value.get().name]])
+    }
+}
+tasks.register('verifyJoinedAssembly') {
+    doLast {
+        file('joined-assembly.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([events:events, observations:rows]))
+        println 'VERIFIED_JOINED_ASSEMBLY both-loaders+existing+late+lazy-version+identity+typed'
+    }
+}

@@ -1,0 +1,25 @@
+def fixtureTarget = cloche.singleTarget { c -> c.fabric { } }
+def consumerLoader = new java.net.URLClassLoader([file('legacy-aw-classes').toURI().toURL()] as URL[], fixtureTarget.main.class.classLoader)
+def owner = consumerLoader.loadClass('LegacyAwConsumer')
+def compilationType = consumerLoader.loadClass('earth.terrarium.cloche.target.compilation.TargetCompilation')
+def allRoles = [fixtureTarget.main, fixtureTarget.data.value.get(), fixtureTarget.getTest().value.get()]
+if (fixtureTarget.client.isConfigured.get()) {
+    def c = fixtureTarget.client.value.get()
+    allRoles.addAll([c, c.data.value.get(), c.getTest().value.get()])
+}
+tasks.named('verifyPlatform') {
+    doLast {
+        def before = tasks.names.toSet()
+        allRoles.each { c ->
+            def old = owner.getMethod('result', compilationType).invoke(null, c)
+            assert old.accessWidenTask.get().outputFile.get() == c.finalMinecraftFile.get()
+            assert old.decompileTask.get().outputFile.get() == c.sources.get()
+            assert old.compileMinecraftFiles.get() == c.compileMinecraftFiles.get()
+            assert old.runtimeExtraFiles.get() == c.runtimeExtraClasspathFiles.get()
+            assert old.preapplyMixinsTasks.get() == c.preapplyMixinsTasks.get()
+        }
+        assert tasks.names.toSet() == before
+        consumerLoader.close()
+        println 'VERIFIED_AW_LEGACY_RESULT_NO_ADDITIONAL_REGISTRATION'
+    }
+}

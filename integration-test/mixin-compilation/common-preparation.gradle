@@ -1,0 +1,83 @@
+import net.msrandom.stubs.GenerateStubApi
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def left = cloche.targets.getByName('left')
+def right = cloche.targets.getByName('right')
+if (providers.gradleProperty('scenario').get() == 'stub-all-off') left.mixinPreapplication.set(false)
+subprojects { apply plugin: 'java-library' }
+def nativeFile = layout.buildDirectory.file('native-common/ordinary.jar')
+def nativeTask = tasks.register('produceCommonNative') {
+    outputs.file(nativeFile)
+    doLast {
+        if (providers.gradleProperty('commonFault').orNull == 'native') throw new GradleException('common_native_failure')
+        def out = nativeFile.get().asFile; out.parentFile.mkdirs()
+        new java.util.jar.JarOutputStream(new FileOutputStream(out)).withCloseable { jar ->
+            jar.putNextEntry(new java.util.jar.JarEntry('native.txt')); jar.write('native'.bytes); jar.closeEntry()
+        }
+        println 'COMMON_NATIVE_READY'
+    }
+}
+file('repository/ordinary/ref/1/ref-1-extra.jar').bytes = file('repository/probe/ref/1/ref-1-extra.jar').bytes
+def all = [left.main, right.main, left.data.value.get(), left.getTest().value.get(), left.client.value.get(), left.client.value.get().getTest().value.get(), right.data.value.get()]
+all.each { c ->
+    c.dependencies { d ->
+        d.implementation.add(project.files(nativeFile).builtBy(nativeTask))
+        d.implementation.add('ordinary:ref:1:extra')
+        d.implementation.add(project.dependencies.project(path:':populated'))
+        d.implementation.add(project.dependencies.project(path:':empty'))
+    }
+}
+tasks.withType(Mixin).configureEach { operation ->
+    if (operation.name.startsWith('preapplyLeft') && !operation.name.contains('Client') && !operation.name.contains('Data') && !operation.name.contains('Test')) {
+        doFirst { if (providers.gradleProperty('commonFault').orNull == 'mixin') throw new GradleException('common_mixin_failure') }
+        doLast { if (providers.gradleProperty('commonFault').orNull == 'record') appliedMixins.get().asFile.text = '{broken_common_record' }
+    }
+}
+def inputs = [:]
+tasks.withType(GenerateStubApi).configureEach { stub ->
+    doFirst {
+        assert nativeFile.get().asFile.isFile()
+        assert stub.taskDependencies.getDependencies(stub).contains(nativeTask.get())
+        def rows = classpaths.get()
+        assert rows.size() == 2
+        rows.each { artifacts ->
+            assert artifacts.any { it.file.get().asFile == nativeFile.get().asFile }
+            def extras = artifacts.findAll { it.file.get().asFile.name == 'ref-1-extra.jar' }
+            assert extras.size() == 1
+            assert extras.first().moduleId.get().toString() == 'ordinary:ref'
+            assert !artifacts.any { it.type.orNull?.toString() == 'PROJECT' }
+        }
+        inputs[path] = rows.collect { artifacts -> artifacts.collect { a -> [file:a.file.get().asFile.path, component:a.componentId.orNull, module:a.moduleId.orNull?.toString()] } }
+        println 'COMMON_STUB_PREPARATION_READY ' + path
+    }
+}
+tasks.named('verifyStubs') {
+    doLast {
+        def projectRows = all.collect { c ->
+            def view = c.compileConfiguration.get().incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+            def artifacts = view.artifacts.artifacts
+            assert artifacts.every { it.file.isDirectory() || !it.file.exists() }
+            assert artifacts.any { it.id.componentIdentifier.projectPath == ':empty' && !it.file.exists() }
+            assert artifacts.any { it.id.componentIdentifier.projectPath == ':populated' }
+            assert !project(':empty').layout.buildDirectory.dir('classes/java/main').get().asFile.exists()
+            assert !project(':populated').layout.buildDirectory.dir('classes/java/main').get().asFile.exists()
+            def producers = view.files.buildDependencies.getDependencies(null)*.path
+            assert producers.containsAll([':empty:compileJava', ':populated:compileJava'])
+            [compilation:c.toString(), projects:artifacts.collect { [component:it.id.componentIdentifier.toString(), file:it.file.path, variant:it.variant.displayName] }, producers:producers]
+        }
+        file('common-preparation-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([stubs:inputs, projects:projectRows]))
+        println 'VERIFIED_COMMON_PREPARATION'
+    }
+}
+gradle.taskGraph.whenReady { graph ->
+    assert !graph.allTasks.any { it.project != project }
+    if (providers.gradleProperty('scenario').get() == 'stub-all-off') assert !graph.allTasks.any { it instanceof Mixin }
+}

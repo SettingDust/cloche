@@ -113,6 +113,7 @@ internal abstract class MinecraftTargetInternal(
         })
 
         withMixinAgent.convention(false)
+        mixinPreapplication.convention(true)
 
         project.afterEvaluate {
             if (!loaderVersion.isPresent) {

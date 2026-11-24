@@ -40,6 +40,10 @@ interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDep
 
     val finalJar: Provider<out Jar>
 
+    /** Preapply external compile mod Mixins to the development compile view. Defaults to true. */
+    val mixinPreapplication: Property<Boolean>
+        @Input get
+
     val withMixinAgent: Property<Boolean>
         @Optional
         @Input

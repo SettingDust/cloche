@@ -1,0 +1,16 @@
+import org.gradle.api.attributes.Attribute
+
+// Gradle 9.5.1 retains the originating artifact name (including classifier) in transformed IDs.
+// Combine that native ID with the complete selected variant; never pair artifacts by component alone.
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def origin = { a ->
+    def id = a.id
+    [id.componentIdentifier, id.hasProperty('originalFileName') ? id.originalFileName : (id.hasProperty('fileName') ? id.fileName : id),
+     a.variant.displayName,
+     a.variant.attributes.keySet().findAll { it != state }.collectEntries { [(it.name):a.variant.attributes.getAttribute(it)] }]
+}
+ext.matchCleanArtifact = { original, artifacts ->
+    def matches = artifacts.findAll { origin(it) == origin(original) }
+    assert matches.size() == 1 : [original, matches]
+    matches[0]
+}
