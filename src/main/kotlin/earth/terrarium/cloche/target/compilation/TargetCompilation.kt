@@ -48,6 +48,9 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.registerTransform
 import javax.inject.Inject
 
+internal val REMAP_SCOPE = Attribute.of("earth.terrarium.cloche.remap-scope", String::class.java)
+internal const val RAW_REMAP_SCOPE = "raw"
+
 private fun Project.getUnmappedModFiles(configurationName: String) =
     getRawRoleFiles(configurationName, resolvableModConfigurationName(configurationName), unmapped = true)
 
@@ -81,7 +84,10 @@ internal fun Project.getRawRoleFiles(
                             val attribute = key as Attribute<Any>
                             attribute(attribute, classpath.attributes.getAttribute(attribute)!!)
                         }
-                        if (unmapped) attribute(REMAPPED_ATTRIBUTE, false)
+                        if (unmapped) {
+                            attribute(REMAPPED_ATTRIBUTE, false)
+                            attribute(REMAP_SCOPE, RAW_REMAP_SCOPE)
+                        }
                         attribute(MIXIN_STATE_ATTRIBUTE, RAW_MIXIN_STATE)
                     }
                 }
@@ -109,6 +115,7 @@ internal fun Project.getUnmappedClasspath(classpath: Provider<out Configuration>
 
                     attributes {
                         attribute(REMAPPED_ATTRIBUTE, false)
+                        attribute(REMAP_SCOPE, RAW_REMAP_SCOPE)
                         attribute(MIXIN_STATE_ATTRIBUTE, RAW_MIXIN_STATE)
                     }
                 }.artifacts.artifactFiles
@@ -295,6 +302,11 @@ private fun setupModTransformationPipeline(
         }
 
         project.dependencies.registerTransform(RemapAction::class) {
+            val extra = target.additionalRemapClasspath
+            // Supplemental files belong to the target; ordinary lookup files belong to the compilation.
+            val scope = "compilation:${compilation.sourceSet.name}"
+            from.attribute(REMAP_SCOPE, RAW_REMAP_SCOPE)
+            to.attribute(REMAP_SCOPE, scope)
             // Gradle derives @InputArtifactDependencies from `from`; transitive remap inputs must stay raw too.
             from
                 .attribute(MIXIN_STATE_ATTRIBUTE, RAW_MIXIN_STATE)
@@ -336,6 +348,7 @@ private fun setupModTransformationPipeline(
                 extraClasspath.from(compilation.info.intermediaryMinecraftClasspath)
                 extraClasspath.from(compileClasspath)
                 extraClasspath.from(runtimeClasspath)
+                extraClasspath.from(extra)
 
                 cacheDirectory.set(getGlobalCacheDirectory(project))
 
@@ -378,7 +391,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal>
     @Inject
     constructor(
         info: TargetCompilationInfo<T>,
-    ) : CompilationInternal() {
+    ) : CompilationInternal(), earth.terrarium.cloche.api.target.compilation.MainDependencyScope {
         private val _info = info
 
         open val info
@@ -671,17 +684,26 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal>
             setupModTransformationPipeline(project, _info.target, this)
 
             val remapped = _info.target.modRemapNamespace.map(String::isNotEmpty)
+            val scope = project.provider {
+                if (remapped.get()) "compilation:${sourceSet.name}" else RAW_REMAP_SCOPE
+            }
 
             val minecraftBuildDependenciesHolder: Configuration =
                 project.configurations.detachedConfiguration(
                     project.dependencies.create(
                         project.files().builtBy(_info.intermediaryMinecraftClasspath),
                     ),
+                    project.dependencies.create(
+                        project.files().builtBy(_info.target.modRemapNamespace.map { namespace ->
+                            if (namespace.isEmpty()) emptyList() else listOf(target.additionalRemapClasspath)
+                        }),
+                    ),
                 )
 
             project.configurations.named(sourceSet.compileClasspathConfigurationName) {
                 attributes.attribute(MOD_CLASSPATH_PREFERABLE_ATTRIBUTE, true)
                 attributes.attributeProvider(REMAPPED_ATTRIBUTE, remapped)
+                attributes.attributeProvider(REMAP_SCOPE, scope)
                 attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
 
                 extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)
@@ -690,6 +712,7 @@ internal abstract class TargetCompilation<T : MinecraftTargetInternal>
             project.configurations.named(sourceSet.runtimeClasspathConfigurationName) {
                 attributes.attribute(MOD_CLASSPATH_PREFERABLE_ATTRIBUTE, true)
                 attributes.attributeProvider(REMAPPED_ATTRIBUTE, remapped)
+                attributes.attributeProvider(REMAP_SCOPE, scope)
                 attributes.attribute(IncludeTransformationStateAttribute.ATTRIBUTE, _info.includeState)
 
                 extendsFrom(target.mappingsBuildDependenciesHolder, minecraftBuildDependenciesHolder)

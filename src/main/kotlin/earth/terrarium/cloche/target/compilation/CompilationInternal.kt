@@ -7,11 +7,13 @@ import earth.terrarium.cloche.api.attributes.MinecraftModLoader
 import earth.terrarium.cloche.api.target.ClocheTarget
 import earth.terrarium.cloche.api.target.TARGET_NAME_PATH_SEPARATOR
 import earth.terrarium.cloche.api.target.compilation.ClocheDependencyHandler
+import earth.terrarium.cloche.api.target.compilation.ScopedDependencyHandler
 import earth.terrarium.cloche.api.target.compilation.Compilation
 import earth.terrarium.cloche.api.target.isSingleTarget
 import earth.terrarium.cloche.api.target.targetName
 import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.ClocheTargetInternal
+import earth.terrarium.cloche.target.forge.independentGame
 import earth.terrarium.cloche.target.MinecraftTargetInternal
 import earth.terrarium.cloche.util.optionalDir
 import earth.terrarium.cloche.util.withIdeaModel
@@ -92,7 +94,19 @@ internal abstract class CompilationInternal : Compilation, Dependencies {
         @Internal get
 
     val dependencyHandler: ClocheDependencyHandler by lazy(LazyThreadSafetyMode.NONE) {
-        project.objects.newInstance<ClocheDependencyHandler>(target.minecraftVersion)
+        project.objects.newInstance<ScopedDependencyHandler>(target.minecraftVersion).also { handler ->
+            var requests = 0
+            handler.addRemapClasspath = { files ->
+                val owner = target as? MinecraftTargetInternal
+                require(owner != null && this === owner.main) {
+                    "Cannot declare remapClasspath on compilation '${sourceSet.name}'; move it to target.dependencies or main.dependencies."
+                }
+                owner.additionalRemapClasspath.from(files)
+            }
+            handler.requestGame = { mc, loader, neo ->
+                independentGame(project, lowerCamelCaseGradleName("clocheRemap", sourceSet.name, "game${++requests}"), mc, loader, neo)
+            }
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

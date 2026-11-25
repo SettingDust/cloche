@@ -41,7 +41,8 @@ internal fun Configuration.addCollectedDependencies(collector: DependencyCollect
 internal abstract class MinecraftTargetInternal(
     private val name: String,
 ) : MinecraftTarget, Dependencies, ClocheTargetInternal {
-    abstract val main: TargetCompilation<*>
+    abstract override val main: TargetCompilation<*>
+    internal val additionalRemapClasspath: ConfigurableFileCollection = project.files()
     abstract override val data: LazyConfigurableInternal<TargetCompilation<*>>
     abstract override val test: LazyConfigurableInternal<TargetCompilation<*>>
 

@@ -11,8 +11,6 @@ import earth.terrarium.cloche.target.compilation.GameShards
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
-import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
-import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.patchesConfigurationName
@@ -32,7 +30,6 @@ import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.Action
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ExternalModuleDependency
-import org.gradle.api.attributes.Usage
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
@@ -133,13 +130,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     override val legacyClasspath = main.legacyClasspath
 
     init {
-        project.dependencies.add(minecraftLibrariesConfiguration.name, forgeDependency {
-            capabilities {
-                requireFeature("dependencies")
-            }
-        })
-
-        project.dependencies.add(universal.name, forgeDependency {})
+        val userdev = wirePatchedGame(
+            project, resolvePatchedMinecraft, minecraftLibrariesConfiguration, universal,
+            project.configurations.getByName(sourceSet.patchesConfigurationName), this is NeoforgeTarget, ::forgeDependency,
+        )
 
         metadata.modLoader.convention("javafml")
 
@@ -163,18 +157,6 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         main.dependencyHandler.implementation(clientExtra)
 
-        val userdev = forgeDependency {
-            capabilities {
-                requireFeature("moddev-bundle")
-            }
-        }
-
-        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev)
-
-        resolvePatchedMinecraft.configure {
-            patches.from(project.configurations.named(sourceSet.patchesConfigurationName))
-            libraries.from(minecraftLibrariesConfiguration)
-        }
 
         project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev)
 
@@ -187,17 +169,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
 
     protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
-        minecraftVersion.zip(loaderVersion, ::Pair).flatMap { (minecraftVersion, forgeVersion) ->
-            group.zip(artifact) { group, artifact ->
-                dependencyFactory.create(group, artifact, null).apply {
-                    version {
-                        strictly(version(minecraftVersion, forgeVersion))
-                    }
-
-                    configure()
-                }
-            }
-        }
+        loaderDependency(project, group, artifact, minecraftVersion, loaderVersion, ::version, configure)
 
     protected abstract fun version(minecraftVersion: String, loaderVersion: String): String
 
@@ -269,27 +241,8 @@ internal fun registerJoinedGame(
         }
     }
 
-    val libraries = project.configurations.create(lowerCamelCaseGradleName(featureName, "minecraftLibraries")) {
-        isCanBeConsumed = false
-        attributes.attribute(
-            MinecraftOperatingSystemAttribute.attribute,
-            project.objects.named(operatingSystemName()),
-        )
-        attributes.attribute(Usage.USAGE_ATTRIBUTE, project.objects.named(Usage.JAVA_RUNTIME))
-    }
-    val universal = project.configurations.create(lowerCamelCaseGradleName(featureName, "forgeUniversal")) {
-        isCanBeConsumed = false
-    }
-    val patched = project.tasks.register<ResolvePatchedMinecraft>(
-        lowerCamelCaseGradleName("resolve", featureName, "patchedMinecraft"),
-    ) {
-        group = "minecraft-resolution"
-        this.minecraftVersion.set(minecraftVersion)
-        this.universal.from(universal)
-        this.output.set(output(minecraftRemapNamespace.map {
-            it.ifEmpty { MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE }
-        }))
-    }
+    val (libraries, universal, patched) = registerPatchedGame(project, featureName, minecraftVersion,
+        output(minecraftRemapNamespace.map { it.ifEmpty { MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE } }))
     val clientExtra = project.tasks.register<GenerateForgeClientExtra>(
         lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
     ) {

@@ -124,7 +124,7 @@ publishing {
 
 tasks.test {
     useJUnitPlatform()
-    exclude("**/IncludeTargetIdentityTests*", "**/MixinCompilationTests*")
+    exclude("**/IncludeTargetIdentityTests*", "**/MixinCompilationTests*", "**/DependencyRemapTests*")
 
     dependsOn(tasks.pluginUnderTestMetadata)
 }
@@ -186,6 +186,21 @@ tasks.register<Test>("mixinCompilationTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
     systemProperty("fixture.metadata", layout.buildDirectory.file("pluginUnderTestMetadata/plugin-under-test-metadata.properties").get().asFile.absolutePath)
     inputs.dir(layout.projectDirectory.dir("integration-test/mixin-compilation"))
+}
+
+tasks.register<Test>("dependencyRemapTest") {
+    doNotTrackState("Validates first production in isolated Gradle user homes")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    include("**/DependencyRemapTests*")
+    dependsOn(tasks.pluginUnderTestMetadata)
+    systemProperty("fixture.metadata", tasks.pluginUnderTestMetadata.get().outputDirectory.file("plugin-under-test-metadata.properties").get().asFile.absolutePath)
+    systemProperty("fixture.gradleHome", gradle.gradleHomeDir!!.absolutePath)
+    systemProperty("fixture.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
+    systemProperty("fixture.offline", gradle.startParameter.isOffline)
+    providers.gradleProperty("org.gradle.java.installations.paths").orNull?.let { systemProperty("fixture.toolchains", it) }
+    workingDir(layout.projectDirectory)
 }
 
 kotlin {

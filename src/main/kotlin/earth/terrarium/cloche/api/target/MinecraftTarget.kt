@@ -16,7 +16,8 @@ import org.gradle.api.tasks.bundling.Jar
 
 @Suppress("UnstableApiUsage")
 @JvmDefaultWithoutCompatibility
-interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDependencyModifiers {
+interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDependencyModifiers, earth.terrarium.cloche.api.target.compilation.MainDependencyScope {
+    val main: earth.terrarium.cloche.api.target.compilation.MainDependencyScope
     override val minecraftVersion: Property<String>
         @Input get
 

@@ -5,6 +5,8 @@ import earth.terrarium.cloche.api.target.ForgeTarget
 import earth.terrarium.cloche.api.target.compilation.Compilation
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
+import earth.terrarium.cloche.target.forge.LoaderModule
+import earth.terrarium.cloche.target.forge.forgeModuleVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.MinecraftCodevForgePlugin
 import net.msrandom.minecraftcodev.forge.task.GenerateMcpToSrg
@@ -31,21 +33,18 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
     }
 
     init {
-        group.convention("net.minecraftforge")
-        artifact.convention("forge")
-
+        group.convention(LoaderModule.FORGE.group)
+        artifact.convention(LoaderModule.FORGE.artifact)
+        // Forge development/runtime roles do not belong to lookup-only requests.
+        minecraftLibrariesConfiguration.attributes.attribute(NO_NAME_MAPPING_ATTRIBUTE, true)
         project.dependencies.add(minecraftLibrariesConfiguration.name, "net.msrandom:codev-forge-runtime:0.1.1")
+
 
         removeNameMappingService(main)
 
         data.onConfigured(::removeNameMappingService)
         test.onConfigured(::removeNameMappingService)
 
-        minecraftLibrariesConfiguration.attributes.attribute(NO_NAME_MAPPING_ATTRIBUTE, true)
-
-        resolvePatchedMinecraft.configure {
-            neoforge.set(false)
-        }
     }
 
     private fun removeNameMappingService(compilation: Compilation) {
@@ -59,7 +58,7 @@ internal abstract class ForgeTargetImpl @Inject constructor(name: String) : Forg
     }
 
     override fun version(minecraftVersion: String, loaderVersion: String) =
-        "$minecraftVersion-$loaderVersion"
+        forgeModuleVersion(minecraftVersion, loaderVersion)
 
     override fun addJarInjects(compilation: CompilationInternal) {
         val hasAccessTransformers = providerFactory.provider { !compilation.accessWideners.isEmpty }

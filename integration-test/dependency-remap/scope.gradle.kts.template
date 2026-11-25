@@ -1,0 +1,26 @@
+import earth.terrarium.cloche.ClocheExtension
+import earth.terrarium.cloche.ClochePlugin
+
+buildscript {
+    val config = java.util.Properties().apply {
+        file(providers.gradleProperty("metadata").get()).inputStream().use { load(it) }
+    }
+    dependencies { classpath(files(config.getProperty("implementation-classpath").split(File.pathSeparator))) }
+}
+pluginManager.apply(ClochePlugin::class.java)
+configurations.matching { it.name.startsWith("clocheRemap") }.configureEach {
+    incoming.beforeResolve { println("LOOKUP_RESOLUTION") }
+}
+group = "probe"
+version = "1"
+configure<ClocheExtension> {
+    metadata.modId.set("probe")
+    singleTarget { fabric {
+        minecraftVersion.set("1.20.1")
+        loaderVersion.set("0.16.0")
+        mixinPreapplication.set(false)
+        dependencies { remapClasspath(forgeMinecraft("1.20.1", "47.4.20")) }
+        main.dependencies { remapClasspath(files("supplement.jar")) }
+        test { dependencies { modImplementation.add("probe:ordinary:1") } }
+    } }
+}
