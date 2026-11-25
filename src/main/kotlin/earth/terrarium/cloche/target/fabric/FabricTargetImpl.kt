@@ -9,6 +9,7 @@ import earth.terrarium.cloche.target.compilation.GamePart
 import earth.terrarium.cloche.target.compilation.GameShards
 import earth.terrarium.cloche.api.metadata.FabricMetadata
 import earth.terrarium.cloche.api.target.FabricTarget
+import earth.terrarium.cloche.api.target.GameJars
 import earth.terrarium.cloche.api.target.compilation.FabricIncludedClient
 import earth.terrarium.cloche.modId
 import earth.terrarium.cloche.target.compilation.CompilationInternal
@@ -74,6 +75,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
         project, name, featureName, minecraftVersion, minecraftRemapNamespace, outputDirectory,
         loadMappingsTask.flatMap(LoadMappings::output),
     )
+    override val gameJars get() = game.gameJars
     private val commonLibrariesConfiguration = game.commonLibraries
     private val clientLibrariesConfiguration = game.clientLibraries
     private val intermediaryClasspath = game.intermediary
@@ -402,6 +404,7 @@ internal abstract class FabricTargetImpl @Inject constructor(name: String) :
 
 internal data class FabricGame(
     val named: GameShards.Split<Provider<RegularFile>>,
+    val gameJars: GameJars.Split,
     val intermediary: FileCollection,
     val commonLibraries: Configuration,
     val clientLibraries: Configuration,
@@ -635,6 +638,16 @@ internal fun registerFabricGame(
 
     return FabricGame(
         GameShards.Split(commonJar, clientJar),
+        GameJars.Split(
+            minecraftRemapNamespace.flatMap { namespace ->
+                if (namespace.isEmpty()) resolveCommonMinecraft.flatMap(ResolveMinecraftCommon::output)
+                else remapCommonMinecraftIntermediary.flatMap(RemapTask::outputFile)
+            },
+            minecraftRemapNamespace.flatMap { namespace ->
+                if (namespace.isEmpty()) resolveClientMinecraft.flatMap(ResolveMinecraftClient::output)
+                else remapClientMinecraftIntermediary.flatMap(RemapTask::outputFile)
+            },
+        ),
         intermediaryClasspath,
         commonLibrariesConfiguration,
         clientLibrariesConfiguration,

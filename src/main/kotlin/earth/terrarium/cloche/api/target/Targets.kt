@@ -12,6 +12,9 @@ import org.gradle.api.provider.Property
 
 @JvmDefaultWithoutCompatibility
 interface FabricTarget : MinecraftTarget, FabricSecondarySourceSets, FabricCompilation {
+    /** Common and client shards in intermediary names, or the resolved files when mapping is skipped. */
+    val gameJars: GameJars.Split
+
     override val metadata: FabricMetadata
 
     val client: LazyConfigurable<FabricSecondarySourceSets>
@@ -22,6 +25,9 @@ interface FabricTarget : MinecraftTarget, FabricSecondarySourceSets, FabricCompi
 
 @JvmDefaultWithoutCompatibility
 interface ForgeLikeTarget : MinecraftTarget, ForgeCompilation {
+    /** The patched, joined Minecraft JAR in the loader's namespace. */
+    val gameJars: GameJars.Joined
+
     override val data: LazyConfigurable<ForgeCompilation>
     override val test: LazyConfigurable<ForgeCompilation>
 

@@ -4,6 +4,7 @@ import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
+import earth.terrarium.cloche.api.target.GameJars
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.*
 import earth.terrarium.cloche.target.compilation.GamePart
@@ -52,6 +53,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     internal val minecraftLibrariesConfiguration = game.libraries
     private val universal = game.universal
     internal val resolvePatchedMinecraft = game.patched
+    final override val gameJars = GameJars.Joined(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output))
     internal val generateClientExtra = game.clientExtra
     private val clientExtra = game.implementationClientExtra
     private val primaryGame = providerFactory.provider { GamePart.JOINED }
