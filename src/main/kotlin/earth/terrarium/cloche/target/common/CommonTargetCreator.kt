@@ -247,7 +247,7 @@ internal fun createCommonTarget(
                 it,
                 variant,
                 true,
-                commonTarget.dependents.map {
+                commonTarget.stubParticipants.map {
                     it.map { dataGetter(it as MinecraftTargetInternal) }
                 },
             )
@@ -267,7 +267,7 @@ internal fun createCommonTarget(
                 it,
                 variant,
                 false,
-                commonTarget.dependents.map {
+                commonTarget.stubParticipants.map {
                     it.map { testGetter(it as MinecraftTargetInternal) }
                 },
             )
@@ -288,7 +288,7 @@ internal fun createCommonTarget(
         { it.data.internalValue ?: it.main },
         { it.test.internalValue ?: it.main },
         ModDistribution.common, // TODO Can be ModDistribution.client depending on includedClient state
-        commonTarget.dependents.map {
+        commonTarget.stubParticipants.map {
             it.map { (it as MinecraftTargetInternal).main }
         },
     )
@@ -311,7 +311,7 @@ internal fun createCommonTarget(
                     ?: it.main
             },
             ModDistribution.client,
-            commonTarget.dependents.map {
+            commonTarget.stubParticipants.map {
                 it.map {
                     (it as? FabricTargetImpl)?.client?.internalValue as? TargetCompilation<*>
                         ?: (it as MinecraftTargetInternal).main

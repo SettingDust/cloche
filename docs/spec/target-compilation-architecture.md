@@ -20,13 +20,13 @@ compilation 的原 `setupFiles` 是唯一原位组合与注册真源；[Mixin �
 
 本文拥有内部固定拓扑、阶段投影与兼容合同，Mixin owner 继续拥有有效环境、分片与 records/state、四消费者精确文件及失败/缓存合同。两者必须同时成立：Mixin 的输入表述须与本文 Joined/Split 形状及第 8 节已收窄的内部兼容边界一致，不保留旧 Info Map/String 或 preview 适配入口，也不得继续以 Map 作为内部各阶段的主载体。Info 纯输入、无平台强转/nullable 哨兵、唯一注册、身份、完整消费与生产时序义务不因模型或入口变化而放宽。各 owner 的历史 authority/验收记录保持其原范围，组织条款一致不等于模型衔接、实现或动态验收已经全部完成。
 
-本文不修改 PRD、ADR、Mixin Spec、发布或 Codev authority；不规定实施步骤或任务图，不形成实施许可或 readiness 判断。不增加公开 DSL、职责服务、总 context、registry、通用 pipeline、freeze 或调度器。不修角色精度、Forge clientTest、sources/javadoc 普通布尔时序、Common 环/孤立语义或测试环境迁移；正式依赖升版、发布、提交和推送不在本范围。最终 IDE 验证沿 Mixin owner 的取消决定，不换名恢复。
+本文不改变 PRD、ADR、Mixin Spec、发布或 Codev 各自负责的行为边界；不规定实施步骤或任务图，不形成实施许可或 readiness 判断。原组织重构不增加公开 DSL；本规范的 `stubFrom` 扩展仅用于第 6 节的 Common stub 参与关系。不增加职责服务、总 context、registry、通用 pipeline、freeze 或调度器。不修角色精度、Forge clientTest、sources/javadoc 普通布尔时序、Common 环/孤立语义或测试环境迁移；正式依赖升版、发布、提交和推送不在本范围。最终 IDE 验证沿 Mixin owner 的取消决定，不换名恢复。
 
 ## 2. 领域与状态归属
 
 具体 target 必须继续聚合 loader、游戏/loader 版本、mappings、metadata conventions、main/client/data/test 家族、run 和最终产物选择。compilation 必须继续拥有自己的 SourceSet、依赖 collectors/attributes、AW/Mixin 声明、原 compile/runtime Configuration 以及输出。顶层 `MinecraftTarget` 的公开继承与 main 转发保持；target AW 仍是 main AW 的转发，不得变为全家族默认 AW。`Compilation.mixins` 仍是本项目资源声明，不等于外部预应用 sources。
 
-Common 是共享源码关系及既有参与 target 的 API 交集，不是游戏 common 分片、独立游戏 runtime 或可伪造的 clean main。feature 是非 test 的 Gradle 输出接线，不是另一个 compilation；多 target 中的 main 不一定是 Java main SourceSet。
+Common 的源码共享关系与 stub 参与关系不同：后者按第 6 节确定用于 API 交集的 target。Common 不是游戏 common 分片、独立游戏 runtime 或可伪造的 clean main。feature 是非 test 的 Gradle 输出接线，不是另一个 compilation；多 target 中的 main 不一定是 Java main SourceSet。
 
 可变状态必须继续由原 DSL、Property、Configuration、SourceSet 与 Task 实例持有。函数可以返回被多个真实消费者使用的 Provider、TaskProvider、FileCollection 或无行为的小型结果；结果不得含服务、可执行闭包集合、target 回引用或另一套注册生命周期。不得为缩短参数而把任意导航藏进 receiver、巨型输入包或隐式全局状态。
 
@@ -126,6 +126,9 @@ preparation、artifact/component 投影和真正文件物化是三个不同义�
 
 - 任务依赖发现必须从原生文件依赖及必要条件 operation 接通，不通过 `stubGames.get()`、`resolvedArtifacts.get()`、`.files` 枚举或读取记录/输出内容猜测任务。
 - Common stub 必须按同一参与者 Provider 保留分组、外部 component 信息及游戏原角色；对象投影不能代替 producer 闭包，也不伪造游戏 component。关闭时 stub 的游戏次序沿原 `runtime extra → primary`，与 SourceSet 的 `primary → extra` 追加不同。
+- `shared.stubFrom(platform)` 只令该平台参与 `shared` 的 stub 计算。每个已配置的 common compilation 沿用正常参与平台的 main、client、data、test 选择及回退规则。正常源码关系确定的参与者与显式参与者取并集，同一平台对同一 stub 只计一次；未声明时保持原行为。
+- 每个平台以其对应 compilation 已有的 stub 游戏及有效编译依赖为一组输入；不按 `implementation` 等声明配置名筛选，不将各平台文件展平。新增参与者可以缩小共同 API：例如两平台都有 `Widget.open()`，只有原参与者有 `Widget.preview()`，则新增平台后生成的 stub 保留 `open()`、排除 `preview()`。
+- 此声明不建立源码依赖，不让平台编译或打包 `shared` 的源码，不调整平台运行时依赖，也不把该平台计入 common 的版本或 loader 类型推导。验收以真实 stub 成员变化、平台 JAR 中没有 common 独有类及声明前后运行时依赖一致为依据；正常源码依赖和重复声明作对照。
 - Java/Kotlin 保留原 `C`/SourceSet 文件身份和用户追加；sources 使用已选输入和有效 libraries，并接同一 preparation；sync 必须在既有执行位置实际物化有效外部 compile/游戏及独立原 runtime，按原 downloadSources 选择 sources Provider。只执行 producer 或保存 Provider 不算完成消费。
 
 消费者不得重新判断 enabled、side、records 或枚举 Mixin。模型解析不会因存在 `Task.dependsOn` 自动执行任务；直接 Tooling 必须沿既有准备流程，在相应 Transform 参数读取/隔离和消费解析前完成所有必要生产。同请求先任务后模型的既有方式可以复用，真实先后必须有动态证据；不得在 model builder 内另建调度器，不支持任意第三方物化入口的自动执行推定。
@@ -155,7 +158,7 @@ Linkage 必须继续成组维护 compile/runtime、include/constraints、AW/Mixi
 
 Common 源码 static linkage、buckets、AW/Mixins、Expect/Actual、class-extension 与 includedClient weakTreeLink 仍是原关系；它们与 stub classpath 分开。不得为消费输入重构顺带改掉这些关系或现有 Common secondary 创建路径。
 
-Common 与 run 必须分别选择已有家族值，不使用带模式参数的统一 selector，不为选择自行创建缺失的具体 secondary。Common main 取具体 main；Common main 的 data/test 优先 target 对应 secondary，否则 main；Common client 取独立 Fabric client 或 main，其 data/test 在独立 client 存在时优先 client secondary、缺失则该 client，否则取 target secondary、再 main。Common stub 仍仅对既有参与 target 求交，不额外增加同 target 另一侧 operation。
+Common 与 run 必须分别选择已有家族值，不使用带模式参数的统一 selector，不为选择自行创建缺失的具体 secondary。Common main 取具体 main；Common main 的 data/test 优先 target 对应 secondary，否则 main；Common client 取独立 Fabric client 或 main，其 data/test 在独立 client 存在时优先 client secondary、缺失则该 client，否则取 target secondary、再 main。每个 Common compilation 按第 6 节的 stub 参与者集合独立求交，不额外增加同 target 另一侧 operation。
 
 run 保留自己的原 Provider 回退：Fabric server 取 main、client 取独立 client 或 main；clientData/clientTest 取独立 client 对应 secondary，否则 target 对应 secondary。例如独立 client 已存在但缺 data，Common client:data 回退该 client，run clientData 回退 target.data；若 run 所需 secondary 最终仍不存在，沿既有 afterEvaluate 检查失败，不自动创建。joined run 沿原 main/data/test 与平台差异，clientTest TODO 不在此次修复。
 

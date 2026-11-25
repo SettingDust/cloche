@@ -61,6 +61,7 @@ Common 先选择已有参与 compilation，再投影同一消费输入；Common 
 - **构造与监听。** 原构造返回前的库、metadata、secondary 接线副作用必须仍在返回前完成。保持 `construct → publish → listeners → action`、listener 登记顺序、`onConfigured` 对已存在对象立即执行及迟到对象发布时执行的路径；重复配置只执行新 action。feature、SourceSet/sync、buckets、公共编译接线及 Linkage 保持原相对位置，不改为“所有对象创建后”统一阶段。
 - **依赖选择。** 普通 raw、有效消费 view、完整 unmapped C/R 与角色 view 各守原用途。完整 unmapped 从原 C/R 分别派生 `raw + REMAPPED=false`，不由 mod/ordinary 并集重建；四个辅助角色配置继续保留。既有多图 `(id, variant)` 交集算法不在本决定中替换，也不声称其角色精度已证明。保留原生 producer、原项目/SourceSet 关系，不重建 ProjectDependency、不强制 JAR、不重选原依赖图。
 - **Mixin 产品行为。** 沿用 PRD 的默认启用、解析前后配置 opt-out、常规 JAR 原生属性链适用范围、有效环境、四消费者、确切清理和失败传播。每个 compilation 使用自己的输入与预应用结果；关闭恢复原请求与旧视图，不安装本私有 state（包括 raw），不由该消费链调度 Mixin/Strip，但保留正常外部 producer、AW 与 remap。Common 保持既有跨 target API 交集，不为同 target 增加另一侧 operation 或双侧交集。
+  此处保留的是跨 target 求交的语义，不限定后续可声明的参与平台。未声明 `stubFrom` 时参与者不变；显式参与关系见[架构规格第 6 节](../spec/target-compilation-architecture.md)。
 - **开发与运行/发布隔离。** raw 只供上游，clean 只向编译、sources、stub、sync，不回灌 Mixin。preview AW 与 runtime 辅助 AW 来源保持区别：本地 runtime 辅助项沿原 target AW，独立 client 及其 data/test 的 runtime common 仍取 main 原 AW；sources primary 不由 Mixin side 推导。run/legacy 使用原 R 与原 AW/extra，项目发布沿原 Jar/remap/include 及 raw compile 解析链，不接 clean/records。发布任务若本来依赖编译，仍可能随编译失败。
 - **惰性与失败。** 保持固定拓扑与 Provider 延迟的开关、side、primary，以及原 `withDependencies` / `afterEvaluate` 配置能力；不在配置期读取文件，不用占位回填、freeze 或新 scheduler。必要生产、清理、解析及 I/O 失败阻断消费并保留原因；Codev 正常可选失败/fallback 语义不变，不按日志升级错误，也不增加“clean 失败取 raw”的自动回退。注册/监听失败可能留有部分 Gradle 注册或已发布对象，本决定不引入事务回滚或自动重试。
 

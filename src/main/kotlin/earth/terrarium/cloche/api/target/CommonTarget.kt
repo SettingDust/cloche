@@ -24,6 +24,9 @@ interface CommonTarget : ClocheTarget, CommonSecondarySourceSets {
 
     val client: LazyConfigurable<CommonSecondarySourceSets>
 
+    /** Include this platform in this common target's API stubs without sharing sources with it. */
+    fun stubFrom(platform: MinecraftTarget)
+
     // Derived properties based on the dependant targets
     val dependents: Provider<List<MinecraftTarget>>
 

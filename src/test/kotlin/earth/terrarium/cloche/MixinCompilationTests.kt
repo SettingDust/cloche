@@ -1219,6 +1219,43 @@ class MixinCompilationTests {
     fun commonStubsIntersectEffectiveParticipantsAndFallbacks() = verifyCommonStubs(false)
 
     @Test
+    fun explicitStubParticipantsDoNotShareSourcesOrRuntime() {
+        var baseline: String? = null
+        for (mode in listOf("baseline", "explicit", "duplicates")) {
+            val directory = Files.createTempDirectory(Path.of(System.getProperty("fixture.metadata")).parent.parent, "stub-from-$mode-")
+            val home = directory.resolve("private-home")
+            prepare(directory, home, "stub-from")
+            Files.delete(directory.resolve("build.gradle"))
+            Files.delete(directory.resolve("src/main/java/Consume.java"))
+            val fixtures = Path.of("integration-test/mixin-compilation")
+            Files.copy(fixtures.resolve("stub-from.gradle.kts"), directory.resolve("build.gradle.kts"))
+            Files.copy(fixtures.resolve("stub-from-observe.gradle"), directory.resolve("observe.gradle"))
+            val runner = GradleRunner.create().withProjectDir(directory.toFile()).withTestKitDir(home.toFile())
+            fun run(label: String, vararg tasks: String) = try {
+                runner.withArguments(listOf("--offline", "--no-build-cache", "--no-configuration-cache", "--stacktrace", "--max-workers=2",
+                    "-g", home.toString(), "-PclocheClasspathMetadata=${directory.resolve("classpath.properties")}", "-Pmode=$mode") + tasks)
+                    .build().also { Files.writeString(directory.resolve("$label.log"), it.output) }
+            } catch (e: UnexpectedBuildFailure) {
+                Files.writeString(directory.resolve("$label.log"), e.buildResult.output)
+                throw e
+            }
+            val cold = run("cold", "createSharedApiStub")
+            assertEquals(org.gradle.testkit.runner.TaskOutcome.SUCCESS, cold.task(":createSharedApiStub")?.outcome)
+            assertEquals(org.gradle.testkit.runner.TaskOutcome.SUCCESS, cold.task(":accessWidenLeftMinecraft")?.outcome)
+            for (producer in listOf(":resolveRightPatchedMinecraft", ":accessWidenRightMinecraft")) {
+                if (mode == "baseline") assertNull(cold.task(producer))
+                else assertEquals(org.gradle.testkit.runner.TaskOutcome.SUCCESS, cold.task(producer)?.outcome)
+            }
+            assertFalse(cold.tasks.any { it.path.startsWith(":accessWidenLeftClient") || it.path.startsWith(":accessWidenRightData") })
+            assertTrue(cold.tasks.none { it.path.startsWith(":preapply") })
+            val remaining = listOf("SharedData", "SharedTest", "SharedClient", "SharedClientData", "SharedClientTest", "Control")
+            run("platforms", *remaining.map { "create${it}ApiStub" }.toTypedArray(), "observePlatforms")
+            val platforms = Files.readString(directory.resolve("platforms.json"))
+            if (baseline == null) baseline = platforms else assertEquals(baseline, platforms)
+        }
+    }
+
+    @Test
     fun commonMainStubsIntersectEffectiveParticipants() = verifyCommonStubs(true)
 
     private fun verifyCommonStubs(mainOnly: Boolean) {
@@ -2154,6 +2191,17 @@ class MixinCompilationTests {
                     jar.write(value.toByteArray())
                     jar.closeEntry()
                 }
+            }
+        }
+        if (scenario == "stub-from") {
+            put("src/shared/java/fixture/SharedOnly.java", "package fixture; public class SharedOnly {}")
+            put("src/right/java/fixture/ForgeOnly.java", "package fixture; public class ForgeOnly {}")
+            for (version in 1..2) {
+                val extra = if (version == 2) "public void preview() {}" else ""
+                val classes = compile("widget-$version", mapOf("probe/Widget.java" to "package probe; public class Widget { public void open() {} $extra }"))
+                val base = "repository/probe/widget/$version/widget-$version"
+                jar("$base.jar", classes, emptyMap())
+                put("$base.pom", "<project><modelVersion>4.0.0</modelVersion><groupId>probe</groupId><artifactId>widget</artifactId><version>$version</version></project>")
             }
         }
         val apiProbe =

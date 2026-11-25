@@ -90,6 +90,14 @@ internal abstract class CommonTargetInternal @Inject constructor(
         }
     }
 
+    private val explicitStubParticipants = linkedSetOf<MinecraftTarget>()
+
+    override fun stubFrom(platform: MinecraftTarget) {
+        explicitStubParticipants.add(platform)
+    }
+
+    val stubParticipants = dependents.map { (it + explicitStubParticipants).distinct() }
+
     override val minecraftVersions: Provider<Set<String>> = run {
         val objects = project.objects
 
