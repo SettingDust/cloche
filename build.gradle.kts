@@ -59,7 +59,7 @@ dependencies {
     implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.1.0+terrarium.0.7.2")
     implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.1.1+terrarium.0.9.2")
     implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.1.1+terrarium.0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.1.1+terrarium.0.6.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.1.2+terrarium.0.6.0")
     implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.1.0+terrarium.0.7.2")
     implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.1.0+terrarium.0.6.3")
     implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.1.0+terrarium.0.7.2")
@@ -137,7 +137,7 @@ tasks.register<Test>("includeIdentityTest") {
     include("**/IncludeTargetIdentityTests*")
     dependsOn(tasks.pluginUnderTestMetadata)
     workingDir(layout.projectDirectory)
-    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
     val reportsDirectory = layout.buildDirectory.dir("reports/test/include-identity")
     val temporaryDirectory = layout.buildDirectory.dir("tmp/include-identity/tmp")
     systemProperty("java.io.tmpdir", temporaryDirectory.get().asFile.absolutePath)
@@ -183,7 +183,7 @@ tasks.register<Test>("mixinCompilationTest") {
     include("**/MixinCompilationTests*")
     dependsOn(tasks.pluginUnderTestMetadata)
     workingDir(layout.projectDirectory)
-    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) })
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
     systemProperty("fixture.metadata", layout.buildDirectory.file("pluginUnderTestMetadata/plugin-under-test-metadata.properties").get().asFile.absolutePath)
     inputs.dir(layout.projectDirectory.dir("integration-test/mixin-compilation"))
 }
@@ -204,5 +204,5 @@ tasks.register<Test>("dependencyRemapTest") {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
 }
