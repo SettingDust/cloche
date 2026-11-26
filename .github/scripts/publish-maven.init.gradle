@@ -4,7 +4,7 @@ import java.security.MessageDigest
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
 
-// This init script targets the repository's pinned Gradle 9.4.0.
+// Loaded only by the dedicated CI publication invocation.
 def require = { boolean condition, String message ->
     if (!condition) throw new GradleException("CI Maven: ${message}")
 }

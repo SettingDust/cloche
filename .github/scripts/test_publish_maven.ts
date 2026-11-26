@@ -1,10 +1,10 @@
 // Focused native-publisher regression check. Run serially; uses the existing Gradle home.
-// deno test --allow-read=build/tmp,../.mp1-maven-tests --allow-write=build/tmp,../.mp1-maven-tests --allow-run=cmd.exe .github/scripts/test_publish_maven.ts
+// deno test --allow-read=build/tmp --allow-write=build/tmp --allow-run=cmd.exe .github/scripts/test_publish_maven.ts
 // On Linux, grant --allow-run=bash instead.
 const root = new URL("../../", import.meta.url);
 const path = (url: URL) => decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:)/, "$1");
 const rootPath = path(root);
-const stagingParent = new URL("../.mp1-maven-tests/", root);
+const stagingParent = new URL("build/tmp/mp1-staging/", root);
 const init = path(new URL(".github/scripts/publish-maven.init.gradle", root));
 const decoder = new TextDecoder();
 function assert(value: unknown, message: string): asserts value {

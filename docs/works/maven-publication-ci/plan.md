@@ -68,7 +68,7 @@ Use `GITHUB_TOKEN` with job-level `contents: write` for the same repository URL 
 
 On uncertain push results, read back the remote tip: expected commit confirms update; a definitive rejection with unchanged baseline confirms no update; a failed query or ambiguous competing state remains unconfirmed. Cancellation before the push leaves the remote unchanged. After a successful push, cancellation cannot undo it; never assert unchanged merely because a later step was cancelled. Local tests cover observable interruption points; abrupt hosted termination may leave confirmation unavailable and must be reported as such.
 
-Workflow entry points are `push.branches: [main]`, `push.paths: ['**/gradle.properties']`, and `workflow_dispatch`. Reject manual branch/tag refs other than `refs/heads/main` before publication. Checkout `${{ github.sha }}` and pass that selected SHA to the runner. PRs, tags, unrelated paths, other branches, and `maven` updates have no automatic publication entry. Use checkout, Java-setup, and the pinned Deno runtime setup; the wrapper and Deno standard APIs suffice without a publishing action or additional package ecosystem.
+Workflow entry points are `push.branches: [main]`, `push.paths: ['gradle.properties']` (root only), and `workflow_dispatch`. Reject manual branch/tag refs other than `refs/heads/main` before publication. Checkout `${{ github.sha }}` and pass that selected SHA to the runner. PRs, tags, unrelated paths, other branches, and `maven` updates have no automatic publication entry. Use checkout, Java-setup, and the pinned Deno runtime setup; the wrapper and Deno standard APIs suffice without a publishing action or additional package ecosystem.
 
 ## Verification arrangements and limits
 

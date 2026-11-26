@@ -11,7 +11,7 @@ The user accepted the publishing boundaries below. This ADR records that accepta
 ## Decision
 
 - Publish to the `maven` branch of `github.repository`, with Maven repository paths at the branch root. Each participating project owns its repository's publication branch; Cloche publishes to its own repository.
-- Automatically trigger publishing only for pushes to `main` that change `**/gradle.properties`. Also provide `workflow_dispatch` for manual publishing. Pull requests, other branches, and tags must not automatically publish.
+- Automatically trigger publishing only for pushes to `main` that change the root `gradle.properties`. Nested fixture changes do not select a release. Also provide `workflow_dispatch` for manual publishing. Pull requests, other branches, and tags must not automatically publish.
 - Do not create or move source tags as part of publishing.
 - Use the same repository's `GITHUB_TOKEN` with `contents: write` to update the publication branch.
 - Generate the project's actual Maven publications, including Gradle plugin marker publications, into a dedicated local output directory. Do not copy the entire `mavenLocal` repository.
