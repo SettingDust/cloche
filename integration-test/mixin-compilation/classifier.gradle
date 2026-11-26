@@ -1,0 +1,90 @@
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import earth.terrarium.cloche.target.compilation.TargetCompilationKt
+import earth.terrarium.cloche.target.compilation.MixinPreapplicationKt
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.tasks.compile.JavaCompile
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+idea.module.downloadSources = false
+// Keep the overlapping classifier present for every consumer, including off and failure/recovery.
+def target = cloche.singleTarget { c -> c.fabric { } }
+def c = target.main
+def C = c.compileConfiguration.get()
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def raw = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) }; attributes.attribute(state, 'raw') }
+def fault = providers.gradleProperty('ct3Fault').getOrElse('none')
+def entries = { f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def row = { a -> [id:a.id.displayName, component:a.id.componentIdentifier.displayName, variant:a.variant.displayName,
+    attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] }, file:a.file.absolutePath] }
+tasks.withType(Mixin).configureEach {
+    inputs.property('ct3Fault', fault)
+    doLast {
+        def position = name == 'preapplyCommonMixins' ? 'first' : 'second'
+        if (fault.endsWith(':' + position)) appliedMixins.get().asFile.text = 'invalid CT3 record'
+    }
+}
+tasks.register('compileRuntimeNegative', JavaCompile) {
+    source = files('input/RuntimeNegative.java')
+    classpath = sourceSets.main.compileClasspath
+    destinationDirectory.set(layout.buildDirectory.dir('negative-runtime'))
+    MixinPreapplicationKt.dependOnPreapplication(c, it)
+}
+tasks.register('verifyGameOnly') {
+    inputs.files(c.compileMinecraftFiles)
+    MixinPreapplicationKt.dependOnPreapplication(c, it)
+    doLast { assert c.compileMinecraftFiles.get().every { it.asFile.isFile() }; println 'VERIFIED_GAME_ONLY' }
+}
+tasks.register('verifyClassifier') {
+    dependsOn 'verifyCompile', 'verifySources', 'clocheIdeSync'
+    doLast {
+        def inputs = raw.artifacts.artifacts
+        def outputs = C.incoming.artifacts.artifacts
+        def refArtifacts = inputs.findAll { it.id.componentIdentifier.displayName == 'probe:ref:1' }
+        assert refArtifacts.size() == 2
+        def extra = refArtifacts.find { entries(it.file).containsKey('extra/Extra.class') }
+        def main = refArtifacts.find { entries(it.file).containsKey('probe/Ref.class') }
+        assert extra != null && main != null && extra != main
+        assert outputs.count { it.id.componentIdentifier == main.id.componentIdentifier } == refArtifacts.size()
+        assert matchCleanArtifact(extra, outputs).file == extra.file
+        def clean = matchCleanArtifact(main, outputs)
+        assert clean.file != extra.file
+        def ordinary = TargetCompilationKt.getRawRoleFiles(project, 'compileClasspath', 'nonModCompileClasspath', false).files
+        def mods = TargetCompilationKt.getRawRoleFiles(project, 'compileClasspath', 'modCompileClasspath', false).files
+        assert extra.file in ordinary && !(main.file in ordinary)
+        assert main.file in mods && !(extra.file in mods)
+        assert mods.size() == 2
+        assert (mods + ordinary).every { f -> inputs.any { it.file == f } }
+        assert entries(extra.file)['ref.json'] != null
+        assert !new String(entries(extra.file)['ref.json'], 'UTF-8').contains('"mixins":[]')
+        def enabled = target.mixinPreapplication.get()
+        def ops = enabled ? c.preapplyMixinsTasks.get()*.get() : []
+        ops.each { op ->
+            assert main.file in op.mixinFiles.files && !(extra.file in op.mixinFiles.files)
+            assert op.mixinFiles.files.containsAll(mods)
+            assert !op.mixinFiles.files.any { entries(it).containsKey('runtime/Runtime.class') }
+        }
+        def runtime = configurations.runtimeClasspath.incoming.artifacts.artifacts
+        assert !runtime.any { it.id.componentIdentifier == main.id.componentIdentifier && entries(it.file).containsKey('probe/Ref.class') }
+        assert runtime.any { it.file == extra.file }
+        new URLClassLoader([extra.file.toURI().toURL()] as URL[], (ClassLoader)null).withCloseable { loader ->
+            assert loader.loadClass('extra.Extra').getMethod('value').invoke(null) == 44
+        }
+        // Missing-main counterexample: another artifact of the same component cannot satisfy its association.
+        def rejected = false
+        try { matchCleanArtifact(main, outputs - clean) } catch (AssertionError expected) { rejected = true }
+        assert rejected
+        def result = [enabled:enabled, raw:inputs.collect(row), C:outputs.collect(row), roles:[mods:mods*.path, ordinary:ordinary*.path],
+            main:row(main), extra:row(extra), clean:row(clean), runtime:runtime.collect(row), graph:gradle.taskGraph.allTasks*.path,
+            operations:ops.collect { [task:it.path, sources:it.mixinFiles.files*.path, P:it.outputFile.get().asFile.path, N:it.appliedMixins.get().asFile.path,
+                selectedSourcesDependencies:it.mixinFiles.buildDependencies.getDependencies(null)*.path.sort()] }]
+        file('classifier-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(result))
+        println 'VERIFIED_CLASSIFIER_ROLES_EXTRA_API_RUNTIME_SCOPE ' + enabled
+    }
+}

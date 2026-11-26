@@ -1,0 +1,169 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.target.compilation.TargetCompilation
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+apply from: 'artifact-identity.gradle'
+// This adds supported compilation roles to the shared input fixture, without changing outgoing variants.
+def target = cloche.singleTarget { c -> c.fabric { } }
+target.client.configure { }
+target.data.configure { }
+target.getTest().configure { }
+def compilations = [target.main, target.client.value.get(), target.data.value.get(), target.getTest().value.get()]
+// Native files have independent producers even when the preview is disabled.
+def nativeCompile = tasks.register('produceSyncCompileLibrary', Jar) {
+    from('input/auxiliary.txt')
+    destinationDirectory.set(layout.buildDirectory.dir('sync-native'))
+    archiveFileName.set('compile.jar')
+    doFirst { if (providers.gradleProperty('syncNativeFault').isPresent()) throw new GradleException('sync_native_failure') }
+    doLast { println 'SYNC_NATIVE_COMPILE_PRODUCED' }
+}
+def nativeRuntime = tasks.register('produceSyncRuntimeLibrary', Jar) {
+    from('input/auxiliary.txt')
+    destinationDirectory.set(layout.buildDirectory.dir('sync-native'))
+    archiveFileName.set('runtime.jar')
+    doLast { println 'SYNC_NATIVE_RUNTIME_PRODUCED' }
+}
+compilations.each { c -> c.dependencies { d ->
+    d.implementation.add(files(nativeCompile.flatMap { it.archiveFile }))
+    d.runtimeOnly.add(files(nativeRuntime.flatMap { it.archiveFile }))
+} }
+compilations.tail().each { c ->
+    c.dependencies { d ->
+        if (providers.gradleProperty('scenario').get() == 'file') {
+            d.modCompileOnly.add(project.files('repository/probe/ref/1/ref-1.jar'))
+            d.modImplementation.add(project.files('repository/probe/plain/1/plain-1.jar', 'repository/probe/transitive/1/transitive-1.jar'))
+        } else {
+            d.modCompileOnly.add('probe:ref:1')
+            d.modImplementation.add('probe:plain:1')
+        }
+        d.modRuntimeOnly.add('probe:runtime:1')
+        d.implementation.add('ordinary:ref:1')
+    }
+}
+project(':populated').dependencies.add('api', project(':empty'))
+target.dependencies { d -> d.implementation.add('ordinary:ref:1:extra') }
+// Baseline and off both request the original attributes; compare each C with a separate no-state Configuration too.
+def scenario = providers.gradleProperty('scenario').get()
+if (scenario == 'baseline') target.mixinPreapplication.set(false)
+idea.module.downloadSources = providers.gradleProperty('syncSources').isPresent()
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def baselines = [:]
+compilations.each { c ->
+    baselines[c.name] = configurations.resolvable(c.sourceSet.name + 'NoStateBaseline') {
+        extendsFrom(c.compileConfiguration.get())
+        c.compileConfiguration.get().attributes.keySet().findAll { it != state }.each { a ->
+            attributes.attribute(a, c.compileConfiguration.get().attributes.getAttribute(a))
+        }
+    }
+}
+// Same real failure used by the existing sources checks; no output/notification substitution.
+if (providers.gradleProperty('r4Fault').isPresent()) afterEvaluate {
+    tasks.withType(Mixin).configureEach { sourceNamespace.set('r4_missing_namespace') }
+}
+def entries = { f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+def parameterSources = [:]
+gradle.taskGraph.whenReady { graph ->
+    compilations.each { c ->
+        def op = c.preapplyMixinsTasks.get().first().get()
+        parameterSources[c.name] = [operation:op.path, notification:deps(c.preapplyMixinsTasks.get().collect { it.flatMap { producer -> producer.appliedMixins } }), game:deps(c.compileMinecraftFiles), C:deps(c.compileConfiguration.get()),
+            sources:deps(op.mixinFiles), sourceSet:deps(c.sourceSet.compileClasspath), sync:tasks.named('clocheIdeSync').get().taskDependencies.getDependencies(null)*.path.sort()]
+    }
+}
+def artifact = { a -> [id:a.id.displayName, component:a.id.componentIdentifier.displayName, variant:a.variant.displayName,
+    attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] }, file:a.file.path] }
+tasks.named('clocheIdeSync') {
+    doLast {
+        def actualSyncFiles = inputs.files.files
+        assert nativeCompile.get().state.executed && nativeRuntime.get().state.executed
+        assert actualSyncFiles.containsAll([nativeCompile.get().archiveFile.get().asFile, nativeRuntime.get().archiveFile.get().asFile])
+        assert providers.gradleProperty('syncSources').isPresent() || !gradle.taskGraph.allTasks.any { it.path.startsWith(':populated:') || it.path.startsWith(':empty:') }
+        assert !gradle.taskGraph.allTasks.any { it.name.startsWith('decompile') } == !providers.gradleProperty('syncSources').isPresent()
+        def observation = [scenario:scenario, graph:gradle.taskGraph.allTasks*.path, syncFiles:actualSyncFiles*.path, compilations:[:]]
+        compilations.each { c ->
+            def C = c.compileConfiguration.get()
+            def view = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+            def raw = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) }; attributes.attribute(state, 'raw') }
+            def game = selectedGame(c).asFile
+            def operation = c.preapplyMixinsTasks.get().first().get()
+            assert actualSyncFiles.containsAll(view.files.files)
+            assert view.files.files.contains(nativeCompile.get().archiveFile.get().asFile)
+            assert !view.files.files.contains(nativeRuntime.get().archiveFile.get().asFile)
+            def runtimeFiles = configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files.files
+            assert runtimeFiles.containsAll([nativeCompile.get().archiveFile.get().asFile, nativeRuntime.get().archiveFile.get().asFile])
+            assert actualSyncFiles.containsAll(runtimeFiles)
+            assert !runtimeFiles.any { it.path.contains('mixinStripped') }
+            def consumption = c.class.methods.find { it.name.startsWith('getCompilationConsumption$') }.invoke(c)
+            assert consumption.games.is(c.compileMinecraftFiles)
+            assert consumption.games.get() == c.compileMinecraftFiles.get()
+            assert tasks.named('clocheIdeSync').get().taskDependencies.getDependencies(null).containsAll(consumption.preparation.buildDependencies.getDependencies(null))
+            assert c.compileMinecraftFiles.get().every { actualSyncFiles.contains(it.asFile) && it.asFile.isFile() }
+            assert C.attributes.getAttribute(state) != 'raw'
+            def baseline = baselines[c.name].get()
+            def rows = []
+            if (target.mixinPreapplication.get()) {
+                assert operation.appliedMixins.get().asFile.isFile()
+                assert operation.outputFile.get().asFile.isFile()
+                operation.mixinFiles.each { original ->
+                    def originalArtifact = raw.artifacts.artifacts.find { it.file == original }
+                    def cleanArtifact = matchCleanArtifact(originalArtifact, view.artifacts.artifacts)
+                    assert cleanArtifact != null
+                    def clean = cleanArtifact.file
+                    assert clean != original && actualSyncFiles.contains(clean)
+                    def configName = ['ref.json', 'plain.json', 'transitive.json'].find { entries(original).containsKey(it) }
+                    assert configName != null
+                    def before = entries(original)
+                    def after = entries(clean)
+                    assert before.keySet() == after.keySet()
+                    before.each { path, bytes -> if (path != configName) assert Arrays.equals(bytes, after[path]) : path }
+                    def json = new JsonSlurper().parseText(new String(after[configName], 'UTF-8'))
+                    assert json.mixins == []
+                    if (c.preapplicationSide.get() == 'CLIENT') assert (json.client ?: []) == []
+                    if (configName == 'ref.json') assert json.server == (c.preapplicationSide.get() == 'SERVER' ? [] : ['Unapplied'])
+                    rows.add([raw:original.path, clean:clean.path, component:cleanArtifact.id.componentIdentifier.displayName, variant:cleanArtifact.variant.displayName, rawArtifact:artifact(originalArtifact), cleanArtifact:artifact(cleanArtifact), config:json])
+                }
+                assert new JsonSlurper().parseText(new String(entries(c.compileMinecraftFiles.get().last().asFile)['ref.json'], 'UTF-8')).mixins == (c.preapplicationSide.get() == 'SERVER' ? [] : ['Unapplied'])
+                assert new JsonSlurper().parseText(new String(entries(operation.outputFile.get().asFile)['ref.json'], 'UTF-8')).mixins == ['Ref', 'Unapplied']
+                assert !c.sourceSet.compileClasspath.files.contains(c.finalMinecraftFile.get().asFile)
+            } else {
+                assert C.attributes.getAttribute(state) == null
+                assert C.incoming.artifacts.artifacts.collect(artifact).toSet() == baseline.incoming.artifacts.artifacts.collect(artifact).toSet()
+                assert deps(C) == deps(baseline)
+                assert game == c.finalMinecraftFile.get().asFile
+                assert !operation.appliedMixins.get().asFile.exists()
+                assert !gradle.taskGraph.allTasks.any { it instanceof Mixin || it.name.startsWith('join') }
+            }
+            view.artifacts.artifacts.findAll { it.id.componentIdentifier.displayName == 'ordinary:ref:1' }.each { a ->
+                assert raw.artifacts.artifacts.any { it.file == a.file && it.id == a.id }
+            }
+            if (providers.gradleProperty('syncSources').isPresent()) {
+                assert c.sources.get().asFile.isFile()
+                def sourceEntries = entries(c.sources.get().asFile)
+                def text = sourceEntries[c.name.startsWith('client') ? 'named/ClientGame.java' : 'named/Game.java']
+                assert text != null && new String(text, 'UTF-8').contains(c.name.startsWith('client') ? 'class ClientGame' : 'class Game')
+                assert new String(text, 'UTF-8').contains(c.name.startsWith('client') ? 'implements Client' : 'implements Ref') == target.mixinPreapplication.get()
+                assert !sourceEntries.containsKey(c.name.startsWith('client') ? 'named/Game.java' : 'named/ClientGame.java')
+            }
+            observation.compilations[c.name] = [state:C.attributes.getAttribute(state), game:game.path, games:c.compileMinecraftFiles.get()*.asFile*.path, shards:(c.target.mixinPreapplication.get() ? c.preapplyMixinsTasks.get() : []).collect { p -> def t=p.get(); [operation:t.path, raw:t.inputFile.get().asFile.path, produced:t.outputFile.get().asFile.path, notification:t.appliedMixins.get().asFile.path, producers:deps(p.flatMap { it.appliedMixins })] }, side:c.preapplicationSide.get(),
+                baseline:baseline.incoming.artifacts.artifacts.collect(artifact), baselineDeps:deps(baseline),
+                C:C.incoming.artifacts.artifacts.collect(artifact), view:view.artifacts.artifacts.collect(artifact),
+                Cdeps:deps(C), viewDeps:deps(view.files), sourceSetDeps:deps(c.sourceSet.compileClasspath),
+                sourceSet:c.sourceSet.compileClasspath.files*.path, cleanSources:rows,
+                notification:operation.appliedMixins.get().asFile.path, produced:operation.outputFile.get().asFile.path, parameters:parameterSources[c.name],
+                runtimeGame:c.finalMinecraftFile.get().asFile.path, runtimeExtras:c.runtimeExtraClasspathFiles.get()*.asFile*.path, runtime:(configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files.files + [c.finalMinecraftFile.get().asFile] + c.runtimeExtraClasspathFiles.get()*.asFile)*.path,
+                sources:c.sources.get().asFile.path, sourcesExist:c.sources.get().asFile.isFile()]
+        }
+        file('sync-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(observation))
+        println 'VERIFIED_SYNC ' + scenario
+    }
+}

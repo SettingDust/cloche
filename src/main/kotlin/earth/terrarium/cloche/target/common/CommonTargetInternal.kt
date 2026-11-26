@@ -3,9 +3,9 @@ package earth.terrarium.cloche.target.common
 import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.target.ClocheTarget
+import earth.terrarium.cloche.api.target.compilation.ClocheDependencyHandler
 import earth.terrarium.cloche.api.target.CommonTarget
 import earth.terrarium.cloche.api.target.MinecraftTarget
-import earth.terrarium.cloche.api.target.compilation.ClocheDependencyHandler
 import earth.terrarium.cloche.cloche
 import earth.terrarium.cloche.target.ClocheTargetInternal
 import earth.terrarium.cloche.target.LazyConfigurableInternal
@@ -25,7 +25,7 @@ import org.gradle.kotlin.dsl.setProperty
 import javax.inject.Inject
 
 private fun collectTargetDependencies(target: ClocheTarget): Set<CommonTarget> =
-    (target.dependsOn + target.stubSources + (target.dependsOn + target.stubSources).flatMap { collectTargetDependencies(it) }).toSet()
+    (target.dependsOn + target.dependsOn.flatMap { collectTargetDependencies(it) }).toSet()
 
 private fun <T> Iterable<T>.sharedValue(): T? {
     val iterator = iterator()
@@ -77,9 +77,6 @@ internal abstract class CommonTargetInternal @Inject constructor(
     override val dependsOn: DomainObjectCollection<CommonTarget> =
         project.objects.domainObjectSet(CommonTarget::class)
 
-    override val stubSources: DomainObjectCollection<CommonTarget> =
-        project.objects.domainObjectSet(CommonTarget::class)
-
     override val dependents: Provider<List<MinecraftTarget>> = run {
         val cloche = project.cloche
 
@@ -92,6 +89,14 @@ internal abstract class CommonTargetInternal @Inject constructor(
             }
         }
     }
+
+    private val explicitStubParticipants = linkedSetOf<MinecraftTarget>()
+
+    override fun stubFrom(platform: MinecraftTarget) {
+        explicitStubParticipants.add(platform)
+    }
+
+    val stubParticipants = dependents.map { (it + explicitStubParticipants).distinct() }
 
     override val minecraftVersions: Provider<Set<String>> = run {
         val objects = project.objects
@@ -115,12 +120,6 @@ internal abstract class CommonTargetInternal @Inject constructor(
     val commonType: Provider<String> = dependents.map { dependants ->
         @Suppress("NULLABILITY_MISMATCH_BASED_ON_JAVA_ANNOTATIONS")
         dependants.map { (it as MinecraftTargetInternal).loaderName }.sharedValue()
-    }
-
-    val jvmVersion: Provider<Int> = dependents.flatMap { dependants ->
-        dependants
-            .map { (it as MinecraftTargetInternal).jvmVersion }
-            .reduce { acc, next -> acc.zip(next, ::minOf) }
     }
 
     override fun getName() = name

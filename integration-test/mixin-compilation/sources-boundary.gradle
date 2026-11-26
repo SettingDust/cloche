@@ -1,0 +1,56 @@
+import earth.terrarium.cloche.target.compilation.TargetCompilationKt
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.compilation.GameShardsKt
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def reads = 0
+def producer = tasks.register('produceSelectedInput') { outputs.file(layout.buildDirectory.file('input.jar')) }
+def libraryProducer = tasks.register('produceSelectedLibrary') { outputs.file(layout.buildDirectory.file('library.jar')) }
+def preparationProducer = tasks.register('prepareSources') { }
+def input = layout.file(producer.map { reads++; it.outputs.files.singleFile })
+def alternateProducer = tasks.register('produceAlternateInput') { outputs.file(layout.buildDirectory.file('alternate.jar')) }
+def alternate = layout.file(alternateProducer.map { reads++; it.outputs.files.singleFile })
+def games = new GameShards.Split(input, alternate)
+def primary = objects.property(GamePart).convention(GamePart.COMMON)
+def selected = primary.flatMap { GameShardsKt.selectGame(games, it) }
+def other = primary.flatMap { GameShardsKt.selectGame(games, it == GamePart.COMMON ? GamePart.CLIENT : GamePart.COMMON) }
+def libraries = files(libraryProducer, other)
+def output = objects.fileProperty().convention(layout.buildDirectory.file('first-sources.jar'))
+def sources = TargetCompilationKt.registerMinecraftSources(project, 'decompileBoundary', selected, libraries, files().builtBy(preparationProducer), output)
+assert reads == 0
+// Realizing the task itself keeps every domain Provider lazy.
+def task = sources.get()
+assert reads == 0
+assert task.group == 'sources'
+output.set(layout.buildDirectory.file('changed-sources.jar'))
+libraries.from('input/auxiliary.txt')
+tasks.register('verifySourcesBoundary') {
+    doLast {
+        for (part in [GamePart.COMMON, GamePart.CLIENT]) {
+            primary.set(part)
+            assert task.inputFile.get() == (part == GamePart.COMMON ? input : alternate).get()
+            assert task.classpath.files == [libraryProducer.get().outputs.files.singleFile, other.get().asFile, file('input/auxiliary.txt')].toSet()
+            assert !task.classpath.files.contains(task.inputFile.get().asFile)
+            assert tasks.withType(Decompile).names == ['decompileBoundary'].toSet()
+        }
+        assert task.outputFile.get().asFile == layout.buildDirectory.file('changed-sources.jar').get().asFile
+        assert task.taskDependencies.getDependencies(task).containsAll([producer.get(), alternateProducer.get(), libraryProducer.get(), preparationProducer.get()])
+        primary.set(GamePart.JOINED)
+        try { task.inputFile.get(); assert false : 'Expected primary mismatch failure' }
+        catch (Exception failure) {
+            def messages = []
+            for (Throwable e = failure; e != null; e = e.cause) messages.add(e.message)
+            assert messages.any { it?.contains('Split Minecraft cannot select JOINED') } : messages
+        }
+        primary.set(GamePart.COMMON)
+        file('sources-boundary.json').text = JsonOutput.toJson([input:task.inputFile.get().asFile.path, libraries:task.classpath.files*.path, output:task.outputFile.get().asFile.path, producers:task.taskDependencies.getDependencies(task)*.path.sort()])
+        println 'VERIFIED_SOURCES_BOUNDARY_LAZY_EXPLICIT_HANDLES_PREPARATION'
+    }
+}

@@ -1,0 +1,149 @@
+import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.target.compilation.CompilationInternalKt
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
+import earth.terrarium.cloche.target.compilation.TargetCompilationInfo
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies {
+        classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)))
+    }
+}
+apply plugin: ClochePlugin
+def inputs = new Properties()
+file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { inputs.load(it) }
+def declared = inputs.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)).collect { file(it).canonicalFile }
+[ClochePlugin, TargetCompilationInfo, GameShards].each { type ->
+    def actual = new File(type.protectionDomain.codeSource.location.toURI()).canonicalFile
+    assert declared.contains(actual) : [type.name, actual, declared]
+    println "ASSEMBLY_CODE_SOURCE ${type.name} $actual"
+}
+group = 'probe'
+version = '1'
+cloche.metadata.modId.set('assembly_probe')
+def events = []
+def observations = []
+def local = { c -> configurations.getByName(CompilationInternalKt.getLocalImplementationConfigurationName(c.sourceSet)) }
+def libraries = { t, client -> configurations.getByName(t.featureName + (client ? 'Client' : 'Common') + 'MinecraftLibraries') }
+def checkCommon = { t, c -> assert local(c).extendsFrom.contains(libraries(t, false)) }
+def checkClient = { t, c -> assert local(c).extendsFrom.contains(libraries(t, true)) }
+def primary = { c, value, side ->
+    assert c.info.namedGames instanceof GameShards.Split
+    assert c.info.primaryGame.get() == value
+    assert c.preapplicationSide.get() == side
+    assert c.info.side.get().name() == (value == GamePart.CLIENT ? 'client' : 'common')
+}
+for (early in [true, false]) {
+    def included = cloche.fabric(early ? 'earlyIncluded' : 'lateIncluded') { t ->
+        t.minecraftVersion.set('1.20.1'); t.loaderVersion.set('0.16.0')
+    }
+    def captured = included.main.info.primaryGame
+    assert captured.get() == GamePart.COMMON
+    def registered = tasks.names.toSet()
+    if (early) {
+        included.data.configure { checkCommon(included, it) }
+        included.getTest().configure { checkCommon(included, it) }
+    }
+    included.includedClient.onConfigured {
+        assert included.includedClient.value.present
+        checkClient(included, included.main)
+        assert libraries(included, true).consistentResolutionSource.is(configurations.getByName(included.main.sourceSet.runtimeClasspathConfigurationName))
+        if (early) {
+            checkClient(included, included.data.value.get())
+            checkClient(included, included.getTest().value.get())
+        }
+        events.add(included.name + ':listener')
+    }
+    included.includedClient.configure {
+        assert events.last() == included.name + ':listener'
+        events.add(included.name + ':action')
+        if (!early) {
+            included.data.configure { checkCommon(included, it); checkClient(included, it) }
+            included.getTest().configure { checkCommon(included, it); checkClient(included, it) }
+        }
+    }
+    assert captured.get() == GamePart.CLIENT
+    assert tasks.names.containsAll(registered)
+    assert !included.client.value.present
+    [included.main, included.data.value.get(), included.getTest().value.get()].each { c ->
+        checkClient(included, c)
+        primary(c, GamePart.CLIENT, 'CLIENT')
+        observations.add([target:included.name, compilation:c.name, primary:captured.get().key, side:c.preapplicationSide.get(), local:local(c).extendsFrom*.name.sort()])
+    }
+    def split = cloche.fabric(early ? 'earlySplit' : 'lateSplit') { t ->
+        t.minecraftVersion.set('1.20.1'); t.loaderVersion.set('0.16.0')
+    }
+    def splitPrimary = split.main.info.primaryGame
+    assert splitPrimary.get() == GamePart.COMMON
+    assert split.main.preapplicationSide.get() == 'CLIENT'
+    def awTask = tasks.named("accessWiden${split.featureName.capitalize()}Minecraft").get()
+    def sourceSet = split.main.sourceSet
+    if (early) { split.data.configure { }; split.getTest().configure { } }
+    split.client.onConfigured { c ->
+        assert split.client.value.get().is(c)
+        checkClient(split, c)
+        assert libraries(split, true).consistentResolutionSource.is(configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName))
+        assert libraries(split, false).consistentResolutionSource.is(configurations.getByName(split.main.sourceSet.runtimeClasspathConfigurationName))
+        assert c.generateMetadataTask.is(split.main.generateMetadataTask)
+        // Metadata was connected inside construction, before publish/listener/action.
+        def marker = file('client-main.json')
+        c.mixins.from(marker)
+        assert split.main.generateMetadataTask.get().clientMixinConfigs.files.contains(marker)
+        events.add(split.name + ':listener')
+    }
+    split.client.configure { c ->
+        assert events.last() == split.name + ':listener'
+        events.add(split.name + ':action')
+        c.data.configure { checkClient(split, it); it.mixins.from(file('client-data.json')) }
+        c.getTest().configure { checkClient(split, it); it.mixins.from(file('client-test.json')) }
+    }
+    if (!early) { split.data.configure { }; split.getTest().configure { } }
+    def c = split.client.value.get()
+    assert split.data.value.get().generateMetadataTask.get().clientMixinConfigs.files.contains(file('client-data.json'))
+    assert split.getTest().value.get().generateMetadataTask.get().clientMixinConfigs.files.contains(file('client-test.json'))
+    assert splitPrimary.get() == GamePart.COMMON
+    assert tasks.named(awTask.name).get().is(awTask)
+    assert split.main.sourceSet.is(sourceSet)
+    [split.main, split.data.value.get(), split.getTest().value.get()].each { primary(it, GamePart.COMMON, 'SERVER'); checkCommon(split, it) }
+    [c, c.data.value.get(), c.getTest().value.get()].each { primary(it, GamePart.CLIENT, 'CLIENT'); checkClient(split, it) }
+    assert split.main.info.namedGames.is(c.info.namedGames)
+    assert c.info.namedGames.is(c.data.value.get().info.namedGames)
+    assert c.info.namedGames.is(c.getTest().value.get().info.namedGames)
+    observations.add([target:split.name, primary:splitPrimary.get().key, side:split.main.preapplicationSide.get(), task:awTask.name, sourceSet:sourceSet.name])
+}
+// An independent typed primary stays lazy and validates the named shape on evaluation.
+def original = cloche.targets.getByName('earlySplit').main.info
+def reads = 0
+def selected = GamePart.COMMON
+def lazyPrimary = providers.provider { reads++; selected }
+def typed = new TargetCompilationInfo(original.name, original.target, original.intermediaryMinecraftClasspath,
+    original.namedGames, lazyPrimary, original.runtimeExtraMinecraftFiles, original.extraClasspathFiles,
+    original.side, original.data, original.test, original.includeState, original.includeJarType,
+    original.preapplicationLibraries, original.preapplicationSide)
+assert reads == 0
+assert typed.namedGames.is(original.namedGames)
+assert typed.namedGames.common.is(original.namedGames.common)
+assert typed.namedGames.client.is(original.namedGames.client)
+assert typed.primaryGame.get() == GamePart.COMMON
+selected = GamePart.CLIENT
+assert typed.primaryGame.get() == GamePart.CLIENT
+selected = GamePart.JOINED
+try { typed.primaryGame.get(); assert false : 'accepted incompatible primary' } catch (IllegalArgumentException expected) { }
+// Joined families retain their explicit Joined/JOINED/CLIENT inputs.
+for (loader in ['forge', 'neoforge']) {
+    def t = cloche."$loader"(loader) { it.minecraftVersion.set('1.20.1'); it.loaderVersion.set('47.0.0') }
+    [t.main, t.data.configure { }, t.getTest().configure { }].each {
+        assert it.info.namedGames instanceof GameShards.Joined
+        assert it.info.primaryGame.get() == GamePart.JOINED
+        assert it.preapplicationSide.get() == 'CLIENT'
+    }
+}
+tasks.register('verifyFabricAssembly') {
+    doLast {
+        file('fabric-assembly.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([events:events, observations:observations, primaryReads:reads]))
+        println 'VERIFIED_FABRIC_ASSEMBLY existing+late+publish+listener+action+typed+joined'
+    }
+}

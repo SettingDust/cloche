@@ -1,0 +1,95 @@
+import earth.terrarium.cloche.api.attributes.CommonTargetAttributes
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftCommon
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftClient
+import net.msrandom.minecraftcodev.forge.task.ResolvePatchedMinecraft
+import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
+import net.msrandom.stubs.GenerateStubApi
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.tree.ClassNode
+import java.util.zip.ZipFile
+import groovy.json.JsonOutput
+
+buildscript {
+    def p = new Properties(); file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { p.load(it) }
+    dependencies { classpath files(p.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+repositories { maven { url = uri('repository') }; mavenCentral(); maven { url = 'https://maven.msrandom.net/repository/root/' } }
+def left = cloche.targets.getByName('left'), right = cloche.targets.getByName('right')
+def shared = cloche.commonTargets.getByName('shared')
+def explicit = providers.gradleProperty('mode').get() != 'baseline'
+// Stand in for remote loader, game and mappings inputs. Keep platform compilation, packaging,
+// effective classpaths and stub preparation wired by the real plugin.
+configurations.matching { it.name.endsWith('MinecraftLibraries') || it.name in ['rightPatches','rightForgeUniversal'] }.configureEach { dependencies.clear() }
+configurations.named('leftApi') { dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' } }
+file('input/forge.tiny').text = file('input/mappings.tiny').text.replace('intermediary', 'srg')
+configurations.matching { it.name in ['leftMappings','rightMappings'] }.configureEach {
+    dependencies.clear(); dependencies.add(project.dependencies.create(project.files(name == 'rightMappings' ? 'input/forge.tiny' : 'input/mappings.tiny')))
+}
+def supply = { task, out, name ->
+    task.actions.clear(); task.inputs.file("input/${name}.jar")
+    task.doLast { def f = out.get().asFile; f.parentFile.mkdirs(); f.bytes = file("input/${name}.jar").bytes }
+}
+tasks.withType(ResolveMinecraftCommon).configureEach { supply(it, it.output, 'common') }
+tasks.withType(ResolveMinecraftClient).configureEach { supply(it, it.output, 'client') }
+tasks.withType(ResolvePatchedMinecraft).configureEach {
+    universal.setFrom([]); patches.setFrom([]); libraries.setFrom([]); supply(it, it.output, 'common')
+}
+tasks.withType(GenerateForgeClientExtra).configureEach { supply(it, it.outputFile, 'client-library') }
+configurations.matching { it.name.endsWith('AnnotationProcessor') || it.name == 'annotationProcessor' }.configureEach { dependencies.clear() }
+tasks.withType(JavaCompile).configureEach { options.release.set(17); options.compilerArgs.add('-proc:none'); options.compilerArgumentProviders.clear() }
+def client = left.client.value.get()
+def expected = [Shared:[left.main,right.main], SharedData:[left.data.value.get(),right.data.value.get()],
+    SharedTest:[left.main,right.main], SharedClient:[client,right.main], SharedClientData:[client,right.data.value.get()],
+    SharedClientTest:[client.getTest().value.get(),right.main], Control:[left.main]]
+expected.each { label, both ->
+    tasks.named("create${label}ApiStub", GenerateStubApi) { stub ->
+        doFirst {
+            def groups = classpaths.get(), participants = explicit ? both : both.take(1)
+            assert groups.size() == participants.size()
+            participants.eachWithIndex { c, i ->
+                def game = c.runtimeExtraClasspathFiles.get()*.asFile + [c.finalMinecraftFile.get().asFile]
+                assert groups[i].findAll { !it.componentId.present }.take(game.size())*.file*.get()*.asFile == game
+                def widget = groups[i].findAll { it.moduleId.orNull?.toString() == 'probe:widget' }
+                assert widget*.moduleVersion*.get() == [c.target == left ? '2' : '1']
+                println "GROUP $label ${c.sourceSet.name} ${widget.first().moduleVersion.get()} $game"
+            }
+        }
+        doLast {
+            def members = fileTree(outputDirectory).files.collectMany { f -> new ZipFile(f).withCloseable { z ->
+                def e = z.getEntry('probe/Widget.class'); if (!e) return []
+                def node = new ClassNode(); new ClassReader(z.getInputStream(e)).accept(node, 0)
+                [node.methods*.name.findAll { it != '<init>' }.sort()]
+            } }
+            assert members == [(explicit && label != 'Control') ? ['open'] : ['open','preview']]
+            println "STUB_API $label $members"
+        }
+    }
+}
+tasks.register('observePlatforms') {
+    dependsOn('leftJar','rightJar')
+    doLast {
+        def result = [:]
+        assert !left.getTest().value.present && !client.data.value.present && !right.getTest().value.present
+        assert shared.minecraftVersions.get() == ['1.20.2'] as Set && shared.minecraftVersion.get() == '1.20.2'
+        assert configurations.getByName(shared.sourceSet.compileClasspathConfigurationName).attributes.getAttribute(CommonTargetAttributes.TYPE) == 'fabric'
+        assert !configurations.rightImplementation.allDependencies.any { it.group == 'probe' && it.name == 'widget' }
+        assert configurations.rightCompileOnly.dependencies.any { it.group == 'probe' && it.name == 'widget' && it.version == '1' }
+        [left,right].each { t ->
+            def sources = tasks.named(t.main.sourceSet.compileJavaTaskName, JavaCompile).get().source.files.collect { relativePath(it).replace('\\','/') }.sort()
+            assert sources.any { it.endsWith('/SharedOnly.java') } == (t == left)
+            def jar = tasks.named(t.name+'Jar',Jar).get().archiveFile.get().asFile
+            def classes = new ZipFile(jar).withCloseable { z -> z.entries().toList()*.name.findAll { it.endsWith('.class') }.sort() }
+            assert classes.contains('fixture/SharedOnly.class') == (t == left)
+            if (t == right) assert classes.contains('fixture/ForgeOnly.class')
+            def runtime = configurations.getByName(t.main.sourceSet.runtimeClasspathConfigurationName).incoming.artifacts.artifacts.collect {
+                [it.id.componentIdentifier.displayName, it.file.name]
+            }.sort { it.toString() }
+            assert runtime.any { it[0] == 'probe:widget:2' } == (t == left)
+            result[t.name] = [sources:sources, classes:classes, runtime:runtime]
+        }
+        file('platforms.json').text = JsonOutput.toJson(result)
+    }
+}

@@ -1,0 +1,40 @@
+name: Publish Maven
+
+on:
+  push:
+    branches: [main]
+    paths: ["gradle.properties"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maven-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.4"
+      - name: Publish checked Maven candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          deno run --allow-read --allow-write
+          --allow-run=git,./gradlew
+          --allow-env=GITHUB_TOKEN,GITHUB_REF,GITHUB_SHA,GITHUB_REPOSITORY
+          .github/scripts/publish_maven.ts

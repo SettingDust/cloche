@@ -4,13 +4,14 @@ import earth.terrarium.cloche.ClochePlugin
 import earth.terrarium.cloche.api.metadata.CommonMetadata
 import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.target.ForgeLikeTarget
+import earth.terrarium.cloche.api.target.GameJars
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.*
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.target.compilation.GameShards
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.MetadataFileProvider
-import net.msrandom.minecraftcodev.core.MinecraftOperatingSystemAttribute
-import net.msrandom.minecraftcodev.core.operatingSystemName
 import net.msrandom.minecraftcodev.core.utils.isUnobfuscatedVersion
 import net.msrandom.minecraftcodev.core.utils.lowerCamelCaseGradleName
 import net.msrandom.minecraftcodev.forge.patchesConfigurationName
@@ -22,10 +23,14 @@ import net.msrandom.minecraftcodev.remapper.mappingsConfigurationName
 import net.msrandom.minecraftcodev.remapper.task.LoadMappings
 import net.msrandom.minecraftcodev.remapper.task.RemapTask
 import net.peanuuutz.tomlkt.TomlTable
+import org.gradle.api.Project
+import org.gradle.api.file.Directory
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.RegularFile
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.Action
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ExternalModuleDependency
-import org.gradle.api.attributes.Usage
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
@@ -40,89 +45,31 @@ import javax.inject.Inject
 @Suppress("UnstableApiUsage")
 internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     MinecraftTargetInternal(name), ForgeLikeTarget {
-    internal val minecraftLibrariesConfiguration: Configuration =
-        project.configurations.create(lowerCamelCaseGradleName(featureName, "minecraftLibraries")) {
-            isCanBeConsumed = false
-
-            attributes.attribute(
-                MinecraftOperatingSystemAttribute.attribute,
-                objectFactory.named(operatingSystemName()),
-            )
-
-            attributes.attribute(Usage.USAGE_ATTRIBUTE, objectFactory.named(Usage.JAVA_RUNTIME))
-        }
-
-    private val universal = project.configurations.create(lowerCamelCaseGradleName(featureName, "forgeUniversal")) {
-        isCanBeConsumed = false
-    }
-
-    internal val resolvePatchedMinecraft = project.tasks.register<ResolvePatchedMinecraft>(
-        lowerCamelCaseGradleName("resolve", featureName, "patchedMinecraft"),
-    ) {
-        group = "minecraft-resolution"
-
-        minecraftVersion.set(this@ForgeLikeTargetImpl.minecraftVersion)
-        universal.from(this@ForgeLikeTargetImpl.universal)
-
-        output.set(output(minecraftRemapNamespace.map {
-            it.ifEmpty {
-                MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE
-            }
-        }))
-    }
-
-    internal val generateClientExtra = project.tasks.register<GenerateForgeClientExtra>(
-        lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
-    ) {
-        group = "minecraft-resolution"
-
-        minecraftVersion.set(this@ForgeLikeTargetImpl.minecraftVersion)
-
-        outputFile.set(output(providerFactory.provider { "client-extra" }))
-        neoforge.set(this@ForgeLikeTargetImpl is NeoforgeTarget)
-    }
+    private val game = registerJoinedGame(
+        project, name, featureName, loaderName, minecraftVersion, loaderVersion,
+        minecraftRemapNamespace, outputDirectory, loadMappingsTask.flatMap(LoadMappings::output),
+        this is NeoforgeTarget,
+    )
+    internal val minecraftLibrariesConfiguration = game.libraries
+    private val universal = game.universal
+    internal val resolvePatchedMinecraft = game.patched
+    final override val gameJars = GameJars.Joined(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output))
+    internal val generateClientExtra = game.clientExtra
+    private val clientExtra = game.implementationClientExtra
+    private val primaryGame = providerFactory.provider { GamePart.JOINED }
+    private val preapplicationSide = providerFactory.provider { "CLIENT" }
 
     override val finalJar
         get() = main.includeJarTask!!
-
-    private val remapTask = project.tasks.register<RemapTask>(
-        lowerCamelCaseGradleName("remap", name, "minecraftNamed"),
-    ) {
-        group = "minecraft-transforms"
-
-        inputFile.set(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output))
-
-        classpath.from(minecraftLibrariesConfiguration)
-
-        mappings.set(loadMappingsTask.flatMap(LoadMappings::output))
-
-        sourceNamespace.set(minecraftRemapNamespace)
-
-        outputFile.set(output(project.provider { MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE }))
-    }
-
-    private val minecraftFile = minecraftRemapNamespace.flatMap {
-        if (it.isEmpty()) {
-            resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)
-        } else {
-            remapTask.flatMap(RemapTask::outputFile)
-        }
-    }
-
-    private val clientExtra = project.files(minecraftVersion.map {
-        if (isUnobfuscatedVersion(it)) {
-            emptyList()
-        } else {
-            listOf(generateClientExtra.flatMap(GenerateForgeClientExtra::outputFile))
-        }
-    })
 
     final override val main: ForgeCompilationImpl = objectFactory.newInstance<ForgeCompilationImpl>(
         ForgeCompilationInfo(
             SourceSet.MAIN_SOURCE_SET_NAME,
             this,
-            project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
-            minecraftFile,
+            game.intermediary,
+            game.named,
+            primaryGame,
+            preapplicationSide,
             data = false,
             test = false,
             providerFactory = providerFactory,
@@ -134,8 +81,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 ClochePlugin.DATA_COMPILATION_NAME,
                 this,
-                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
-                minecraftFile,
+                game.intermediary,
+                game.named,
+                primaryGame,
+                preapplicationSide,
                 data = true,
                 test = false,
                 providerFactory = providerFactory,
@@ -154,8 +103,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
             ForgeCompilationInfo(
                 SourceSet.TEST_SOURCE_SET_NAME,
                 this,
-                project.files(resolvePatchedMinecraft.flatMap(ResolvePatchedMinecraft::output)),
-                minecraftFile,
+                game.intermediary,
+                game.named,
+                primaryGame,
+                preapplicationSide,
                 data = false,
                 test = true,
                 providerFactory = providerFactory,
@@ -181,13 +132,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     override val legacyClasspath = main.legacyClasspath
 
     init {
-        project.dependencies.add(minecraftLibrariesConfiguration.name, forgeDependency {
-            capabilities {
-                requireFeature("dependencies")
-            }
-        })
-
-        project.dependencies.add(universal.name, forgeDependency {})
+        val userdev = wirePatchedGame(
+            project, resolvePatchedMinecraft, minecraftLibrariesConfiguration, universal,
+            project.configurations.getByName(sourceSet.patchesConfigurationName), this is NeoforgeTarget, ::forgeDependency,
+        )
 
         metadata.modLoader.convention("javafml")
 
@@ -211,28 +159,10 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
 
         main.dependencyHandler.implementation(clientExtra)
 
-        val userdev = forgeDependency {
-            capabilities {
-                requireFeature("moddev-bundle")
-            }
-        }
-
-        project.dependencies.addProvider(sourceSet.patchesConfigurationName, userdev)
-
-        resolvePatchedMinecraft.configure {
-            patches.from(project.configurations.named(sourceSet.patchesConfigurationName))
-            libraries.from(minecraftLibrariesConfiguration)
-        }
 
         project.dependencies.addProvider(sourceSet.mappingsConfigurationName, userdev)
 
         registerMappings()
-    }
-
-    private fun output(suffix: Provider<String>) = suffix.flatMap { suffix ->
-        outputDirectory.zip(minecraftVersion.zip(loaderVersion) { a, b -> "$a-$b" }) { dir, version ->
-            dir.file("$loaderName-$version-$suffix.jar")
-        }
     }
 
     internal fun loaderVersionRange(version: String): CommonMetadata.VersionRange =
@@ -241,17 +171,7 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
         }
 
     protected fun forgeDependency(configure: ExternalModuleDependency.() -> Unit): Provider<ExternalModuleDependency> =
-        minecraftVersion.zip(loaderVersion, ::Pair).flatMap { (minecraftVersion, forgeVersion) ->
-            group.zip(artifact) { group, artifact ->
-                dependencyFactory.create(group, artifact, null).apply {
-                    version {
-                        strictly(version(minecraftVersion, forgeVersion))
-                    }
-
-                    configure()
-                }
-            }
-        }
+        loaderDependency(project, group, artifact, minecraftVersion, loaderVersion, ::version, configure)
 
     protected abstract fun version(minecraftVersion: String, loaderVersion: String): String
 
@@ -293,4 +213,63 @@ internal abstract class ForgeLikeTargetImpl @Inject constructor(name: String) :
     }
 
     override fun withMetadataToml(action: Action<MetadataFileProvider<TomlTable>>) = main.withMetadataToml(action)
+}
+
+internal data class JoinedGame(
+    val libraries: Configuration,
+    val universal: Configuration,
+    val patched: TaskProvider<ResolvePatchedMinecraft>,
+    val clientExtra: TaskProvider<GenerateForgeClientExtra>,
+    val intermediary: FileCollection,
+    val named: GameShards.Joined<Provider<RegularFile>>,
+    val implementationClientExtra: FileCollection,
+)
+
+internal fun registerJoinedGame(
+    project: Project,
+    name: String,
+    featureName: String?,
+    loaderName: String,
+    minecraftVersion: Provider<String>,
+    loaderVersion: Provider<String>,
+    minecraftRemapNamespace: Provider<String>,
+    outputDirectory: Provider<Directory>,
+    mappings: Provider<RegularFile>,
+    neoforge: Boolean,
+): JoinedGame {
+    fun output(suffix: Provider<String>) = suffix.flatMap { suffix ->
+        outputDirectory.zip(minecraftVersion.zip(loaderVersion) { a, b -> "$a-$b" }) { dir, version ->
+            dir.file("$loaderName-$version-$suffix.jar")
+        }
+    }
+
+    val (libraries, universal, patched) = registerPatchedGame(project, featureName, minecraftVersion,
+        output(minecraftRemapNamespace.map { it.ifEmpty { MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE } }))
+    val clientExtra = project.tasks.register<GenerateForgeClientExtra>(
+        lowerCamelCaseGradleName("generate", featureName, "clientExtra"),
+    ) {
+        group = "minecraft-resolution"
+        this.minecraftVersion.set(minecraftVersion)
+        outputFile.set(output(project.provider { "client-extra" }))
+        this.neoforge.set(neoforge)
+    }
+    val remap = project.tasks.register<RemapTask>(lowerCamelCaseGradleName("remap", name, "minecraftNamed")) {
+        group = "minecraft-transforms"
+        inputFile.set(patched.flatMap(ResolvePatchedMinecraft::output))
+        classpath.from(libraries)
+        this.mappings.set(mappings)
+        sourceNamespace.set(minecraftRemapNamespace)
+        outputFile.set(output(project.provider { MinecraftCodevRemapperPlugin.NAMED_MAPPINGS_NAMESPACE }))
+    }
+    val named = minecraftRemapNamespace.flatMap {
+        if (it.isEmpty()) patched.flatMap(ResolvePatchedMinecraft::output) else remap.flatMap(RemapTask::outputFile)
+    }
+    val implementationClientExtra = project.files(minecraftVersion.map {
+        if (isUnobfuscatedVersion(it)) emptyList() else listOf(clientExtra.flatMap(GenerateForgeClientExtra::outputFile))
+    })
+    return JoinedGame(
+        libraries, universal, patched, clientExtra,
+        project.files(patched.flatMap(ResolvePatchedMinecraft::output)),
+        GameShards.Joined(named), implementationClientExtra,
+    )
 }

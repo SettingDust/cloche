@@ -1,0 +1,58 @@
+import net.msrandom.minecraftcodev.forge.task.ResolvePatchedMinecraft
+import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+repositories { mavenCentral() }
+// This tiny legacy fixture has no expect/actual or class-extension sources.
+configurations.configureEach {
+    dependencies.removeIf { it.group == 'net.msrandom' && it.name in ['java-expect-actual-annotations','class-extension-annotations'] }
+}
+def forge = cloche.targets.getByName('joined')
+if (providers.gradleProperty('r5ForgeOff').isPresent()) forge.mixinPreapplication.set(false)
+forge.accessWideners.from(file('input/game.accesswidener'))
+configurations.named('joinedMinecraftLibraries') { dependencies.clear() }
+configurations.named('joinedMappings') {
+    dependencies.clear()
+    dependencies.add(project.dependencies.create(project.files('input/mappings.tiny')))
+}
+tasks.named('resolveJoinedPatchedMinecraft',ResolvePatchedMinecraft) {
+    actions.clear()
+    universal.setFrom([]); patches.setFrom([]); libraries.setFrom([])
+    output.set(layout.projectDirectory.file('input/common.jar'))
+}
+tasks.named('generateJoinedClientExtra',GenerateForgeClientExtra) {
+    actions.clear()
+    outputFile.set(layout.projectDirectory.file('input/client-library.jar'))
+}
+def writers=[forge.main,forge.data.value.get(),forge.getTest().value.get()].collect { c -> c.class.methods.find { it.name.startsWith('getWriteLegacyClasspath') }.invoke(c) }
+tasks.named('verifyR5Legacy') { dependsOn writers }
+tasks.register('verifyR5LegacyFiles') {
+    dependsOn writers, 'verifyR5Legacy'
+    doLast {
+        def rows=[]
+        [forge.main,forge.data.value.get(),forge.getTest().value.get()].eachWithIndex { c,i ->
+            def task=writers[i].get()
+            def game=c.finalMinecraftFile.get().asFile
+            def files=task.classpath.files
+            assert files.contains(game)
+            assert !files.any { it.name.contains('mixinStripped') || it.name=='applied.jar' }
+            assert !gradle.taskGraph.allTasks.any { it.name.startsWith('preapply') || it.name.startsWith('join') }
+            def actual=task.output.get().asFile.readLines()
+            assert actual.toSet()==files*.absolutePath.toSet()
+            new ZipFile(game).withCloseable { zip ->
+                assert zip.getEntry('named/Game.class') != null
+                def json=new groovy.json.JsonSlurper().parseText(new String(zip.getInputStream(zip.getEntry('ref.json')).bytes,'UTF-8'))
+                assert json.mixins==['Ref','Unapplied']
+            }
+            rows.add([role:c.name,game:game.absolutePath,classpath:files*.absolutePath,text:actual,writer:task.path,enabled:forge.mixinPreapplication.get()])
+        }
+        file('r5-legacy-files-'+forge.mixinPreapplication.get()+'.json').text=JsonOutput.prettyPrint(JsonOutput.toJson(rows))
+        println 'VERIFIED_R5_LEGACY_FILES ' + rows.size()
+    }
+}

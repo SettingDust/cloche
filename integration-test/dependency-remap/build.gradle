@@ -1,0 +1,112 @@
+import earth.terrarium.cloche.ClochePlugin
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftCommon
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftClient
+import org.objectweb.asm.*
+import org.objectweb.asm.tree.*
+import java.util.jar.*
+import java.util.zip.ZipFile
+
+buildscript {
+    def p = new Properties(); file(providers.gradleProperty('metadata').get()).withInputStream { p.load(it) }
+    dependencies { classpath files(p.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+apply plugin: ClochePlugin
+apply plugin: 'maven-publish'
+group='probe'; version='1'
+def neo = providers.gradleProperty('loader').get() == 'neoforge'
+def mc = neo ? '1.21.1' : '1.20.1'
+def loaderVer = providers.gradleProperty('bad').isPresent() ? '9999.invalid' : neo ? '21.1.228' : '47.4.20'
+def root = neo ? 'net/neoforged/neoforge' : 'net/minecraftforge'
+def parent = root+'/event/level/BlockEvent', preferred='fixture/Preferred', shadow=parent+'$FarmlandTrampleEvent'
+def desc='()Lnet/minecraft/core/BlockPos;'
+def cls = { name, superclass, methods ->
+    def w = new ClassWriter(0); w.visit(Opcodes.V17,Opcodes.ACC_PUBLIC,name,null,superclass,null); methods(w); w.visitEnd(); w.toByteArray()
+}
+def jarInput = { path, entries ->
+    def f=file(path); if (f.exists()) return
+    f.parentFile.mkdirs(); new JarOutputStream(f.newOutputStream()).withCloseable { out ->
+        entries.each { n,b -> out.putNextEntry(new JarEntry(n)); out.write(b); out.closeEntry() }
+    }
+}
+// Only the real patched game provides the BreakEvent -> BlockEvent edge. A duplicate in the
+// original classpath disagrees on the second edge and must still take precedence.
+jarInput('ordinary.jar', [(preferred+'.class'):cls(preferred,'java/lang/Object'){ w ->
+    def m=w.visitMethod(Opcodes.ACC_PUBLIC,'getPos',desc,null,null); m.visitCode(); m.visitInsn(Opcodes.ACONST_NULL); m.visitInsn(Opcodes.ARETURN); m.visitMaxs(1,1); m.visitEnd()
+}, (shadow+'.class'):cls(shadow,preferred){}])
+jarInput('repository/probe/caller/1/caller-1.jar',['fixture/Caller.class':cls('fixture/Caller','java/lang/Object'){ w ->
+    [inspect:parent+'$BreakEvent', duplicate:shadow, local:'fixture/TestOnly'].each { method,owner ->
+        def m=w.visitMethod(Opcodes.ACC_PUBLIC|Opcodes.ACC_STATIC,method,'(L'+owner+';)V',null,null)
+        m.visitCode(); m.visitVarInsn(Opcodes.ALOAD,0); m.visitMethodInsn(Opcodes.INVOKEVIRTUAL,owner,'getPos',desc,false); m.visitInsn(Opcodes.POP); m.visitInsn(Opcodes.RETURN); m.visitMaxs(1,1); m.visitEnd()
+    }
+}])
+file('repository/probe/caller/1/caller-1.pom').text='<project><modelVersion>4.0.0</modelVersion><groupId>probe</groupId><artifactId>caller</artifactId><version>1</version></project>'
+jarInput('common.jar',['fixture/Common.class':cls('fixture/Common','java/lang/Object'){}]); jarInput('client.jar',['fixture/Client.class':cls('fixture/Client','java/lang/Object'){}])
+file('mappings.tiny').text='tiny\t2\t0\tobf\tintermediary\tnamed\n'+[(parent):'patchedPosition',(preferred):'ordinaryPosition'].collect { owner,v -> "c\t$owner\t$owner\t$owner\n\tm\t$desc\tgetPos\tgetPos\t$v\n" }.join('')
+repositories { maven { url=uri('repository') }; cloche.all() }
+def enabled=providers.gradleProperty('enabled').isPresent()
+def dual=providers.gradleProperty('dual').isPresent()
+def alternate=providers.gradleProperty('alternate').isPresent()
+def invalidPlacement=providers.gradleProperty('invalidPlacement').isPresent()
+configurations.matching { it.name.startsWith('clocheRemap') }.configureEach { incoming.beforeResolve { println "LOOKUP_RESOLUTION $name" } }
+def declareGame = { d -> d.remapClasspath(neo ? d.neoforgeMinecraft(mc,loaderVer) : d.forgeMinecraft(mc,loaderVer)) }
+def ordinary = { d -> d.modImplementation.add('probe:caller:1'); d.implementation.add(project.files('ordinary.jar')) }
+jarInput('alternate.jar', [(parent+'$BreakEvent.class'):cls(parent+'$BreakEvent',preferred){}])
+jarInput('test-only.jar', ['fixture/TestOnly.class':cls('fixture/TestOnly',preferred){}])
+def configureTarget = { t, second ->
+    t.minecraftVersion.set(mc); t.loaderVersion.set('0.16.0'); t.mixinPreapplication.set(false)
+    t.dependencies { d ->
+        ordinary(d)
+        if (!second && enabled && !neo) declareGame(d)
+        if (second && alternate) d.remapClasspath(project.files('alternate.jar'))
+    }
+    if (!second && enabled && neo) t.main.dependencies { d -> declareGame(d) }
+    t.test { compilation -> compilation.dependencies { d -> ordinary(d); d.implementation.add(project.files('test-only.jar')); if (invalidPlacement) declareGame(d) } }
+}
+def target=dual ? cloche.fabric('alpha') { t -> configureTarget(t,false) } : cloche.singleTarget { c -> c.fabric { t -> configureTarget(t,false) } }
+def other=dual ? cloche.fabric('beta') { t -> configureTarget(t,true) } : null
+cloche.metadata.modId.set('remap_probe')
+// Stand in only for unrelated Fabric vanilla downloads. No replacements on loader preparation or mod transforms.
+configurations.matching { it.name.toLowerCase().endsWith('commonminecraftlibraries') || it.name.toLowerCase().endsWith('clientminecraftlibraries') }.configureEach { dependencies.clear() }
+configurations.matching { it.name in ['api','alphaApi','betaApi'] }.configureEach { dependencies.removeIf { it.group=='net.fabricmc' && it.name=='fabric-loader' } }
+configurations.matching { it.name in ['mappings','alphaMappings','betaMappings'] }.configureEach { dependencies.clear(); dependencies.add(project.dependencies.create(project.files('mappings.tiny'))) }
+[ (ResolveMinecraftCommon): 'common', (ResolveMinecraftClient): 'client' ].each { type, side ->
+    tasks.withType(type).configureEach { producer ->
+        actions.clear(); def dest = layout.projectDirectory.file("inputs/${producer.name}.jar")
+        dest.asFile.parentFile.mkdirs(); java.nio.file.Files.copy(file("${side}.jar").toPath(), dest.asFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        output.set(dest)
+    }
+}
+def mappingTasks=tasks.matching { it.name.startsWith('generate') && it.name.endsWith('MappingsArtifact') }
+mappingTasks.configureEach { from('mappings.tiny') }
+publishing.publications { probe(MavenPublication) { from components.java } }
+def rolesByConfig=dual ? [alpha:'alphaCompileClasspath', beta:'betaCompileClasspath', alphaRuntime:'alphaRuntimeClasspath', betaRuntime:'betaRuntimeClasspath'] : [main:'compileClasspath', test:'testCompileClasspath', runtime:'runtimeClasspath']
+rolesByConfig.each { role,cname ->
+    tasks.register("observe${role.capitalize()}") {
+        def c=configurations.getByName(cname); inputs.files(c)
+        dependsOn mappingTasks
+        doLast {
+            assert !c.files.any { it.name=='patched.jar'||it.name.contains(loaderVer) }
+            def roles = c.incoming.artifacts.artifacts.collect { it.id.componentIdentifier.displayName }.toSorted().unique()
+            def snapshot = file("roles-${role}.txt")
+            if (!enabled) snapshot.text=roles.join('\n'); else assert snapshot.text==roles.join('\n') : roles
+            def caller=c.incoming.artifacts.artifacts.find { it.id.componentIdentifier.displayName=='probe:caller:1' }.file
+            def node=new ClassNode(); new ZipFile(caller).withCloseable { zip -> new ClassReader(zip.getInputStream(zip.getEntry('fixture/Caller.class'))).accept(node,0) }
+            def calls=node.methods.collectEntries { m -> [(m.name):m.instructions.find { it instanceof MethodInsnNode }.name] }
+            def expected=role.startsWith('beta') ? (alternate ? 'ordinaryPosition' : 'getPos') : (enabled ? 'patchedPosition' : 'getPos')
+            assert calls==[inspect:expected,duplicate:'ordinaryPosition',local:role=='test' ? 'ordinaryPosition' : 'getPos'] : calls
+            println "VERIFIED $role $calls"
+        }
+    }
+}
+tasks.register('observeDistribution') {
+    dependsOn target.main.includeJarTask, 'generatePomFileForProbePublication','generateMetadataFileForProbePublication'
+    if (dual) dependsOn other.main.includeJarTask
+    doLast {
+        (dual ? [target,other] : [target]).each { owner ->
+            def archive=owner.main.includeJarTask.get().archiveFile.get().asFile
+            new ZipFile(archive).withCloseable { z -> assert !z.entries().toList().any { it.name.startsWith(root+'/') || it.name.endsWith('.jar') } }
+        }
+        ['pom-default.xml','module.json'].each { n -> def text=file("build/publications/probe/$n").text; assert !text.contains('net.minecraftforge') && !text.contains('net.neoforged') && !text.contains('patched.jar') }
+        println 'VERIFIED packaging and publication'
+    }
+}

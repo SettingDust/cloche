@@ -16,7 +16,8 @@ import org.gradle.api.tasks.bundling.Jar
 
 @Suppress("UnstableApiUsage")
 @JvmDefaultWithoutCompatibility
-interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDependencyModifiers {
+interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDependencyModifiers, earth.terrarium.cloche.api.target.compilation.MainDependencyScope {
+    val main: earth.terrarium.cloche.api.target.compilation.MainDependencyScope
     override val minecraftVersion: Property<String>
         @Input get
 
@@ -40,6 +41,10 @@ interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDep
 
     val finalJar: Provider<out Jar>
 
+    /** Preapply external compile mod Mixins to the development compile view. Defaults to true. */
+    val mixinPreapplication: Property<Boolean>
+        @Input get
+
     val withMixinAgent: Property<Boolean>
         @Optional
         @Input
@@ -48,10 +53,4 @@ interface MinecraftTarget : ClocheTarget, CommonSecondarySourceSets, PlatformDep
     fun mappings(action: Action<MappingsBuilder>)
 
     fun runs(action: Action<RunConfigurations>)
-
-    /**
-     * Provides access to resolved Minecraft JAR artifacts and classpath
-     * for different mapping namespaces.
-     */
-    val minecraftArtifacts: MinecraftArtifactProvider
 }

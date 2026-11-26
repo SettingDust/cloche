@@ -1,99 +1,89 @@
 package earth.terrarium.cloche.target.common
 
 import earth.terrarium.cloche.target.addCollectedDependencies
-import earth.terrarium.cloche.target.compilation.*
+import earth.terrarium.cloche.target.compilation.CommonCompilation
+import earth.terrarium.cloche.target.compilation.externalApiConfigurationName
+import earth.terrarium.cloche.target.compilation.externalCompileConfigurationName
+import earth.terrarium.cloche.target.compilation.externalRuntimeConfigurationName
+import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
+import earth.terrarium.cloche.target.compilation.localRuntimeConfigurationName
+import earth.terrarium.cloche.target.compilation.modConfigurationName
 import org.gradle.api.Project
 import org.gradle.api.plugins.JavaPlugin
 
-context(Project)
+context(projectContext: Project)
 internal fun setupConfigurations(compilation: CommonCompilation) {
     val sourceSet = compilation.sourceSet
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.implementationConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.implementationConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modImplementation)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.apiConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.apiConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modApi)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.compileOnlyConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.compileOnlyConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modCompileOnly)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.compileOnlyApiConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modCompileOnlyApi)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.runtimeOnlyConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modRuntimeOnly)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.localRuntimeConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.localRuntimeConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modLocalRuntime)
     }
 
-    configurations.dependencyScope(modConfigurationName(sourceSet.localImplementationConfigurationName)) {
+    projectContext.configurations.dependencyScope(modConfigurationName(sourceSet.localImplementationConfigurationName)) {
         addCollectedDependencies(compilation.dependencyHandler.modLocalImplementation)
     }
 
-    configurations.named(sourceSet.implementationConfigurationName) {
+    projectContext.configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME)) {
         addCollectedDependencies(compilation.dependencyHandler.implementation)
     }
 
-    configurations.named(sourceSet.apiConfigurationName) {
+    projectContext.configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.API_CONFIGURATION_NAME)) {
         addCollectedDependencies(compilation.dependencyHandler.api)
     }
 
-    configurations.named(sourceSet.compileOnlyConfigurationName) {
+    projectContext.configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME)) {
         addCollectedDependencies(compilation.dependencyHandler.compileOnly)
     }
 
-    configurations.named(sourceSet.compileOnlyApiConfigurationName) {
+    projectContext.configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_API_CONFIGURATION_NAME)) {
         addCollectedDependencies(compilation.dependencyHandler.compileOnlyApi)
     }
 
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME)) {
-        extendsFrom(configurations.getByName(sourceSet.implementationConfigurationName))
-    }
-
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.API_CONFIGURATION_NAME)) {
-        extendsFrom(configurations.getByName(sourceSet.apiConfigurationName))
-    }
-
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME)) {
-        extendsFrom(configurations.getByName(sourceSet.compileOnlyConfigurationName))
-    }
-
-    configurations.dependencyScope(sourceSet.commonBucketConfigurationName(JavaPlugin.COMPILE_ONLY_API_CONFIGURATION_NAME)) {
-        extendsFrom(configurations.getByName(sourceSet.compileOnlyApiConfigurationName))
-    }
-
-    configurations.named(sourceSet.runtimeOnlyConfigurationName) {
+    projectContext.configurations.named(sourceSet.runtimeOnlyConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.runtimeOnly)
     }
 
-    configurations.named(sourceSet.localRuntimeConfigurationName) {
+    projectContext.configurations.named(sourceSet.localRuntimeConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.localRuntime)
     }
 
-    configurations.named(sourceSet.localImplementationConfigurationName) {
+    projectContext.configurations.named(sourceSet.localImplementationConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.localImplementation)
     }
 
-    configurations.named(sourceSet.externalRuntimeConfigurationName) {
+    projectContext.configurations.named(sourceSet.externalRuntimeConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.externalRuntime)
     }
 
-    configurations.named(sourceSet.externalCompileConfigurationName) {
+    projectContext.configurations.named(sourceSet.externalCompileConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.externalCompile)
     }
 
-    configurations.named(sourceSet.externalApiConfigurationName) {
+    projectContext.configurations.named(sourceSet.externalApiConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.externalApi)
     }
 
-    configurations.named(sourceSet.annotationProcessorConfigurationName) {
+    projectContext.configurations.named(sourceSet.annotationProcessorConfigurationName) {
         addCollectedDependencies(compilation.dependencyHandler.annotationProcessor)
     }
 }

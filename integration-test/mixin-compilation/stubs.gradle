@@ -1,0 +1,277 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.ClochePlugin
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftCommon
+import net.msrandom.minecraftcodev.core.task.ResolveMinecraftClient
+import net.msrandom.stubs.GenerateStubApi
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.tasks.compile.JavaCompile
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+import javax.tools.ToolProvider
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def metadata = new Properties()
+file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+def pluginFiles = metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)).collect { file(it) }
+assert pluginFiles.count { it.name.startsWith('minecraft-codev-mixins-') } == 1
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+group = 'probe'; version = '1'
+apply plugin: ClochePlugin
+repositories {
+    maven { url = uri('repository') }
+    mavenCentral()
+    maven { url = 'https://maven.msrandom.net/repository/root/' }
+}
+cloche.metadata.modId.set('stub_probe')
+def off = providers.gradleProperty('scenario').get().endsWith('off')
+def fileMods = providers.gradleProperty('scenario').get() == 'stub-file'
+def mainOnly = providers.gradleProperty('scenario').get().startsWith('stub-main-')
+def left = cloche.fabric('left') { }
+def right = cloche.fabric('right') { }
+[left, right].each { t ->
+    t.minecraftVersion.set(t.name == 'right' ? '1.20.2' : '1.20.1'); t.loaderVersion.set('0.16.0')
+    t.accessWideners.from(file('input/game.accesswidener'))
+    t.dependencies { d ->
+        if (fileMods) {
+            d.modCompileOnly.add(project.files('repository/probe/ref/1/ref-1.jar'))
+            d.modImplementation.add(project.files('repository/probe/plain/1/plain-1.jar', 'repository/probe/transitive/1/transitive-1.jar'))
+        } else {
+            d.modCompileOnly.add('probe:ref:1')
+            d.modImplementation.add('probe:plain:1')
+        }
+        d.modImplementation.add("probe:${t.name}:1")
+        d.implementation.add('ordinary:ref:1')
+    }
+}
+if (!mainOnly) {
+    left.data.configure { }; left.getTest().configure { }
+    left.client.configure { c -> c.getTest().configure { } }
+    right.data.configure { }
+    // Each operation selects sources from its own compile graph, including non-exported compileOnly mods.
+    [left.data.value.get(), left.getTest().value.get(), left.client.value.get(), left.client.value.get().getTest().value.get(), right.data.value.get()].each { c ->
+        c.dependencies { d ->
+            if (fileMods) {
+                d.modCompileOnly.add(project.files('repository/probe/ref/1/ref-1.jar'))
+                d.modImplementation.add(project.files('repository/probe/plain/1/plain-1.jar', 'repository/probe/transitive/1/transitive-1.jar'))
+            } else {
+                d.modCompileOnly.add('probe:ref:1')
+                d.modImplementation.add('probe:plain:1')
+            }
+            d.modImplementation.add("probe:${c.target.name}:1")
+            d.implementation.add('ordinary:ref:1')
+        }
+    }
+}
+// A late opt-out keeps right in every intersection, using its original AW view.
+right.mixinPreapplication.set(!off)
+def common = cloche.common('common')
+def expected = [(common.main):[left.main, right.main]]
+if (!mainOnly) {
+    common.data.configure { }; common.getTest().configure { }
+    common.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+    def client = common.client.value.get()
+    def lc = left.client.value.get()
+    expected.putAll([
+        (common.data.value.get()):[left.data.value.get(), right.data.value.get()],
+        (common.getTest().value.get()):[left.getTest().value.get(), right.main],
+        (client):[lc, right.main],
+        (client.data.value.get()):[lc, right.data.value.get()],
+        (client.getTest().value.get()):[lc.getTest().value.get(), right.main]
+    ])
+    // Path checks may configure client:data later; observe the final participant instead of its earlier fallback.
+    afterEvaluate { expected[client.data.value.get()][0] = lc.data.value.orNull ?: lc }
+}
+configurations.matching { it.name.endsWith('MinecraftLibraries') }.configureEach { dependencies.clear() }
+configurations.matching { it.name.endsWith('Api') || it.name == 'api' }.configureEach {
+    dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' }
+}
+[left, right].each { t ->
+    configurations.named(t.name + 'Mappings') {
+        dependencies.clear(); dependencies.add(project.dependencies.create(project.files('input/mappings.tiny')))
+    }
+}
+tasks.withType(ResolveMinecraftCommon).configureEach {
+    actions.clear(); output.set(layout.buildDirectory.file("fixture-minecraft/${name}.jar"))
+    doLast { output.get().asFile.parentFile.mkdirs(); output.get().asFile.bytes = file('input/common.jar').bytes }
+}
+tasks.withType(ResolveMinecraftClient).configureEach {
+    actions.clear(); output.set(layout.buildDirectory.file("fixture-minecraft/${name}.jar"))
+    doLast { output.get().asFile.parentFile.mkdirs(); output.get().asFile.bytes = file('input/client.jar').bytes }
+}
+configurations.matching { it.name.endsWith('AnnotationProcessor') || it.name == 'annotationProcessor' }.configureEach { dependencies.clear() }
+tasks.withType(JavaCompile).configureEach { options.release.set(17); options.compilerArgs.add('-proc:none'); options.compilerArgumentProviders.clear() }
+
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def observations = [:]
+def producers = [:]
+def operationInputs = [:]
+tasks.withType(Mixin).configureEach {
+    doFirst {
+        [Mixin, net.msrandom.minecraftcodev.mixins.StripMixins, Class.forName('net.msrandom.minecraftcodev.mixins.ProduceMixinsKt'), Class.forName('net.msrandom.minecraftcodev.mixins.MixinRuntimeFailure')].each { type ->
+            println 'CODE_SOURCE ' + type.name + ' ' + type.protectionDomain.codeSource.location
+            assert new File(type.protectionDomain.codeSource.location.toURI()).bytes == pluginFiles.find { it.name.startsWith('minecraft-codev-mixins-') }.bytes
+        }
+        assert net.msrandom.minecraftcodev.mixins.StripMixins.Parameters.getMethod('getRemovalsFile').returnType == org.gradle.api.file.ConfigurableFileCollection
+        println 'GETTER_DESCRIPTOR ()Lorg/gradle/api/file/ConfigurableFileCollection;'
+        assert implementationClasspath.files.count { it.name.startsWith('minecraft-codev-mixins-') } == 1
+        assert implementationClasspath.files.any { it.name == 'sponge-mixin-0.15.0+mixin.0.8.7.jar' }
+        println 'LOCAL_SOURCE_MATCH true'
+        println 'IMPLEMENTATION ' + implementationClasspath.files
+        println 'R3_OPERATION ' + [path, side.get(), mixinFiles.files, inputFile.get()]
+    }
+}
+def stubTasks = []
+def consumerTasks = []
+expected.each { c, participants ->
+    def stubName = 'createCommon' + (c.featureName == null ? '' : c.featureName.capitalize()) + 'ApiStub'
+    def stub = tasks.named(stubName, GenerateStubApi)
+    stubTasks.add(stub)
+    def label = c.sourceSet.name
+    def source = file("input/consumers/$label/Consume${label.capitalize()}.java")
+    source.parentFile.mkdirs()
+    def isClient = c.name.startsWith('client')
+    source.text = "class Consume${label.capitalize()} { named.Game game; " +
+        (!off ? 'probe.Ref shared(named.Game g) { return g; } ' : '') +
+        (!off && isClient ? 'probe.Plain sharedPlain(named.Game g) { return g; } probe.Client sharedClient(named.ClientGame g) { return g; } ' : '') + '}'
+    // Compile the produced stub in isolation; do not alter the native project capability/outgoing protocol.
+    consumerTasks.add(tasks.register('compileStub' + label.capitalize(), JavaCompile) { compile ->
+        compile.source(source)
+        classpath = fileTree(stub.flatMap { it.outputDirectory }).builtBy(stub)
+        destinationDirectory.set(layout.buildDirectory.dir('stub-consumers/' + label))
+        options.release.set(17)
+        options.compilerArgs.add('-proc:none')
+    })
+    stub.configure { s ->
+        doFirst {
+            def actual = classpaths.get()
+            assert actual.size() == 2
+            def rows = []
+            participants.eachWithIndex { p, i ->
+                def view = p.compileConfiguration.get().incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+                def artifacts = view.artifacts.artifacts
+                def games = p.compileMinecraftFiles.get()*.asFile
+                def game = games.first()
+                def extras = games.tail()
+                def stubGames = actual[i].take(games.size())*.file*.get()*.asFile
+                if (p.target.mixinPreapplication.get()) {
+                    assert stubGames == games
+                } else {
+                    assert stubGames == p.runtimeExtraClasspathFiles.get()*.asFile + [p.finalMinecraftFile.get().asFile]
+                }
+                assert actual[i]*.file*.get()*.asFile.toSet() == ([game] + extras + artifacts*.file).toSet()
+                assert p.compileConfiguration.get().attributes.getAttribute(state) != 'raw'
+                assert (p.compileConfiguration.get().attributes.getAttribute(state) != null) == p.target.mixinPreapplication.get()
+                def raw = p.compileConfiguration.get().incoming.artifactView {
+                    componentFilter { !(it instanceof ProjectComponentIdentifier) }
+                    attributes.attribute(state, 'raw')
+                }.artifacts.artifacts
+                def artifactRows = []
+                artifacts.each { a ->
+                    def resolved = actual[i].find { it.file.get().asFile == a.file }
+                    def component = objects.newInstance(GenerateStubApi.ResolvedArtifact)
+                    component.setComponent(a.id.componentIdentifier)
+                    assert resolved.componentId.orNull == component.componentId.orNull
+                    assert resolved.type.orNull == component.type.orNull
+                    assert resolved.moduleId.orNull == component.moduleId.orNull
+                    assert resolved.moduleVersion.orNull == component.moduleVersion.orNull
+                    def originals = raw.findAll { it.id.componentIdentifier == a.id.componentIdentifier && it.variant.displayName == a.variant.displayName }
+                    def original = originals.find { it.file == a.file }
+                    if (original == null) { assert originals.size() == 1; original = originals.first() }
+                    assert original != null
+                    def configName = ['ref.json', 'plain.json', 'transitive.json', 'left.json', 'right.json'].find { entries(original.file).containsKey(it) }
+                    if (configName != null && !(a.id.componentIdentifier instanceof ModuleComponentIdentifier && a.id.componentIdentifier.group == 'ordinary')) {
+                        def content = entries(a.file)
+                        def config = new JsonSlurper().parseText(new String(content[configName], 'UTF-8'))
+                        if (p.target.mixinPreapplication.get()) {
+                            assert config.mixins == []
+                            if (configName == 'ref.json') assert config.server == (p.preapplicationSide.get() == 'SERVER' ? [] : ['Unapplied'])
+                            if (configName == 'plain.json') assert config.client == (p.preapplicationSide.get() == 'CLIENT' ? [] : ['Plain', 'Client'])
+                        } else assert a.file == original.file
+                        def old = entries(original.file)
+                        assert content.keySet() == old.keySet()
+                        content.each { k, v -> if (k != configName) assert v == old[k] }
+                    } else assert a.file == original.file
+                    artifactRows.add([file:a.file.path, raw:original.file.path, component:resolved.componentId.orNull, type:resolved.type.orNull?.toString(), module:resolved.moduleId.orNull?.toString(), version:resolved.moduleVersion.orNull, variant:a.variant.displayName])
+                }
+                assert actual[i].take(games.size()).every { it.componentId.orNull == null }
+                assert game.name.contains('mixinStripped') == p.target.mixinPreapplication.get()
+                if (p.target.mixinPreapplication.get()) {
+                    assert p.preapplyMixinsTasks.get().every { it.get().appliedMixins.get().asFile.isFile() }
+                    assert !entries(game).containsKey('client-only.txt') || p.preapplicationSide.get() == 'CLIENT'
+                    def cfg = new JsonSlurper().parseText(new String(entries(games.last())['ref.json'], 'UTF-8'))
+                    assert cfg.mixins == (p.preapplicationSide.get() == 'SERVER' ? [] : ['Unapplied'])
+                } else assert game == p.finalMinecraftFile.get().asFile
+                rows.add([participant:p.toString(), side:p.preapplicationSide.get(), enabled:p.target.mixinPreapplication.get(), game:game.path, games:games*.path, stubGames:stubGames*.path, extras:extras*.path,
+                    artifacts:artifactRows, producers:operationInputs[p.toString()]])
+            }
+            observations[label] = [task:path, classpaths:rows, dependencies:producers[path]]
+            println 'R3_STUB_INPUT_READY ' + path
+        }
+    }
+}
+gradle.taskGraph.whenReady { graph ->
+    println 'GRAPH ' + graph.allTasks*.path
+    println 'ENV Gradle=' + gradle.gradleVersion + ' JVM=' + System.getProperty('java.version') + ' Home=' + gradle.gradleUserHomeDir
+    expected.each { c, participants -> participants.each { p ->
+        operationInputs[p.toString()] = [game:deps(p.compileMinecraftFiles), extra:deps(p.runtimeExtraClasspathFiles), primary:deps(p.finalMinecraftFile), C:deps(p.compileConfiguration.get()),
+            view:deps(p.compileConfiguration.get().incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files)]
+        assert p.preapplyMixinsTasks.get().every { deps(p.compileMinecraftFiles).contains(it.get().path) } == p.target.mixinPreapplication.get()
+    } }
+    stubTasks.each { stub ->
+        def s = stub.get()
+        producers[s.path] = s.taskDependencies.getDependencies(s)*.path.sort()
+        expected.find { c, participants -> 'createCommon' + (c.featureName == null ? '' : c.featureName.capitalize()) + 'ApiStub' == s.name }.value.each { p ->
+            def required = p.target.mixinPreapplication.get() ? deps(p.compileMinecraftFiles) + p.preapplyMixinsTasks.get()*.get()*.path : deps(p.runtimeExtraClasspathFiles) + deps(p.finalMinecraftFile)
+            assert producers[s.path].containsAll(required)
+            if (!p.target.mixinPreapplication.get()) assert !graph.allTasks.any { it.path.startsWith(':preapply' + p.target.name.capitalize()) }
+        }
+    }
+}
+tasks.register('verifyStubs') {
+    dependsOn consumerTasks
+    doLast {
+        def checks = []
+        expected.each { c, participants ->
+            def label = c.sourceSet.name
+            def stub = stubTasks.find { it.name == 'createCommon' + (c.featureName == null ? '' : c.featureName.capitalize()) + 'ApiStub' }.get()
+            def stubFiles = fileTree(stub.outputDirectory).files
+            assert stubFiles.every { it.name.endsWith('.jar') }
+            def cp = (stubFiles + files('repository/probe/left/1/left-1.jar', 'repository/probe/right/1/right-1.jar', 'repository/probe/ref/1/ref-1.jar').files)*.path.join(File.pathSeparator)
+            def failures = []
+            ['Left', 'Right'].each { unique ->
+                def src = file("input/negative/$label/$unique/Reject.java")
+                src.parentFile.mkdirs(); src.text = "class Reject { unique.$unique unique(named.Game g) { return g; } }"
+                def out = file("build/negative/$label/$unique"); out.mkdirs()
+                def err = new ByteArrayOutputStream()
+                def result = ToolProvider.systemJavaCompiler.run(null, null, err, '-XDrawDiagnostics', '--release', '17', '-proc:none', '-classpath', cp, '-d', out.path, src.path)
+                assert result != 0
+                assert err.toString('UTF-8').contains('compiler.err.prob.found.req')
+                failures.add(err.toString('UTF-8'))
+            }
+            if (off) {
+                def src = file("input/negative/$label/shared/Reject.java")
+                src.parentFile.mkdirs(); src.text = 'class Reject { probe.Ref shared(named.Game g) { return g; } }'
+                def out = file("build/negative/$label/shared"); out.mkdirs()
+                def err = new ByteArrayOutputStream()
+                assert ToolProvider.systemJavaCompiler.run(null, null, err, '-XDrawDiagnostics', '--release', '17', '-proc:none', '-classpath', cp, '-d', out.path, src.path) != 0
+                assert err.toString('UTF-8').contains('compiler.err.prob.found.req')
+                failures.add(err.toString('UTF-8'))
+            }
+            checks.add([sourceSet:label, stubFiles:stubFiles*.path, negativeDiagnostics:failures])
+        }
+        file('stub-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([inputs:observations, compilation:checks]))
+        println 'VERIFIED_STUBS ' + providers.gradleProperty('scenario').get() + ' ' + expected.size()
+    }
+}

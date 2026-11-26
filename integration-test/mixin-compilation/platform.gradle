@@ -1,0 +1,177 @@
+import earth.terrarium.cloche.target.compilation.GamePart
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.tree.ClassNode
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+// Extend the real consumer without replacing AW, Mixin, Strip or their producers.
+def target = cloche.singleTarget { c -> c.fabric { } }
+def form = providers.gradleProperty('platformForm').get()
+if (form == 'included') target.includedClient()
+if (form == 'split') target.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+target.data.configure { }; target.getTest().configure { }
+def roles = [target.main, target.data.value.get(), target.getTest().value.get()]
+if (form == 'split') {
+    def client = target.client.value.get()
+    roles.addAll([client, client.data.value.get(), client.getTest().value.get()])
+}
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def publicMethod = { File f, String method ->
+    def node = new ClassNode()
+    new ClassReader(entries(f)['named/Game.class']).accept(node, 0)
+    (node.methods.find { it.name == method }.access & 1) != 0
+}
+def producers = []
+roles.eachWithIndex { c, i ->
+    def aw = tasks.register("producePlatformAw$i") {
+        def output = layout.buildDirectory.file("platform-aw/${i}.accesswidener")
+        outputs.file(output)
+        doLast {
+            def f = output.get().asFile
+            f.parentFile.mkdirs()
+            // Main owns target AW; every secondary preview additionally exposes namedB.
+            f.text = 'accessWidener v2 named\naccessible class named/Game\n' + (i == 0 ? '' : 'accessible method named/Game namedB ()I\n')
+            println "PLATFORM_AW_PRODUCED $i"
+        }
+    }
+    producers.add(aw)
+    c.accessWideners.setFrom(aw.map { it.outputs.files.singleFile })
+    if (c != target.main) c.dependencies { d ->
+        d.modCompileOnly.add('probe:ref:1')
+        d.modImplementation.add('probe:plain:1')
+        d.implementation.add('ordinary:ref:1')
+    }
+}
+// A raw mod AW comes from a real file producer, separately from explicit compilation/target AW.
+file('input/platform-dependency').mkdirs()
+file('input/platform-dependency/fabric.mod.json').text = '{"schemaVersion":1,"id":"platform_aw","version":"1","accessWidener":"external.accesswidener"}'
+file('input/platform-dependency/external.accesswidener').text = 'accessWidener v2 intermediary\ntransitive-accessible method obf/Game a ()I\n'
+def dependency = tasks.register('producePlatformDependency', Jar) {
+    from('input/platform-dependency')
+    destinationDirectory.set(layout.buildDirectory.dir('platform-dependency'))
+    archiveFileName.set('platform-aw.jar')
+}
+roles.each { c -> c.dependencies { d -> d.modCompileOnly.add(project.files(dependency.flatMap { it.archiveFile })) } }
+configurations.matching { it.name.endsWith('Api') || it.name == 'api' }.configureEach {
+    dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' }
+}
+file('src/main/java/Consume.java').text = 'public class Consume { named.Game game; }'
+file('src/main/kotlin/ConsumeKotlin.kt').text = 'class ConsumeKotlin(val game: named.Game)'
+idea.module.downloadSources = false
+if (form == 'unsplit') target.dependencies { d -> d.include.add('ordinary:ref:1') }
+
+def rows = []
+tasks.withType(AccessWiden).configureEach { t ->
+    doFirst {
+        assert dependency.get().state.executed
+        accessWideners.files.each { assert it.isFile() }
+        def own = producers.findAll { accessWideners.files.contains(it.get().outputs.files.singleFile) }
+        assert !own.empty
+        assert own.every { it.get().state.executed }
+        println 'PLATFORM_AW_READY ' + [path, own*.get()*.path, accessWideners.files*.path]
+    }
+}
+tasks.withType(Decompile).configureEach { t ->
+    doFirst {
+        def c = roles.find { it.sources.get().asFile == outputFile.get().asFile }
+        assert c != null
+        def games = c.compileMinecraftFiles.get()*.asFile
+        def primary = c.info.primaryGame.get()
+        def selected = primary == GamePart.CLIENT ? games.first() : games.last()
+        assert inputFile.get().asFile == selected
+        assert classpath.files.containsAll(games - selected)
+        if (target.mixinPreapplication.get()) {
+            assert !classpath.files.contains(c.finalMinecraftFile.get().asFile)
+            assert c.preapplyMixinsTasks.get().every { it.get().state.executed }
+        }
+        println 'PLATFORM_SOURCES_READY ' + [c.name, inputFile.get(), (games - selected)*.path]
+    }
+}
+tasks.register('verifyPlatform') {
+    if (form == 'unsplit') dependsOn 'includeJar'
+    inputs.files(roles.collect { it.sources })
+    inputs.files(roles.collect { it.compileMinecraftFiles })
+    inputs.files(roles.collect { it.finalMinecraftFile })
+    inputs.files(roles.collect { it.runtimeExtraClasspathFiles })
+    doLast {
+        def enabled = target.mixinPreapplication.get()
+        roles.eachWithIndex { c, i ->
+            def primary = c.info.primaryGame.get()
+            assert primary == ((form == 'included' || c.name.startsWith('client')) ? GamePart.CLIENT : GamePart.COMMON)
+            assert c.info.namedGames instanceof earth.terrarium.cloche.target.compilation.GameShards.Split
+            assert c.info.extraClasspathFiles.present
+            def games = c.compileMinecraftFiles.get()*.asFile
+            def runtime = c.finalMinecraftFile.get().asFile
+            def extras = c.runtimeExtraClasspathFiles.get()*.asFile
+            def ops = c.preapplyMixinsTasks.get()*.get()
+            def client = c.name.startsWith('client')
+            assert extras == (client ? [target.main.finalMinecraftFile.get().asFile] : form == 'included' ? [tasks.named(i == 0 ? 'accessWidenCommonMinecraft' : "accessWiden${c.featureName.capitalize()}CommonMinecraft", AccessWiden).get().outputFile.get().asFile] : [])
+            if (!client) assert c.info.runtimeExtraMinecraftFiles.keySet() == ['common'].toSet()
+            else assert c.info.runtimeExtraMinecraftFiles.isEmpty()
+            if (enabled) {
+                assert games.size() == (form == 'split' && !client ? 1 : 2)
+                assert !games.contains(runtime) && extras.every { !games.contains(it) }
+                def rawCommon = ops.find { entries(it.inputFile.get().asFile).containsKey('named/Game.class') }.inputFile.get().asFile
+                assert publicMethod(rawCommon, 'namedA')
+                assert publicMethod(rawCommon, 'namedB') == (i != 0)
+                if (games.size() == 2) {
+                    assert entries(games[0]).containsKey('client-only.txt')
+                    assert entries(games[1]).containsKey('common-only.txt')
+                    assert new String(entries(games[0])['duplicate.txt']) == 'client'
+                    assert new String(entries(games[1])['duplicate.txt']) == 'common'
+                }
+                assert ops*.side*.get().every { it == (form == 'split' && !client ? 'SERVER' : 'CLIENT') }
+            } else {
+                assert games == [runtime] + extras
+                assert !gradle.taskGraph.allTasks.any { it instanceof Mixin }
+            }
+            // The data/test preview namedB must not leak into local target-AW or main-AW runtime common.
+            def runtimeCommon = primary == GamePart.COMMON ? runtime : extras.first()
+            assert publicMethod(runtimeCommon, 'namedA')
+            assert publicMethod(runtimeCommon, 'namedB') == (primary == GamePart.COMMON && i != 0)
+            def sourceEntries = entries(c.sources.get().asFile)
+            assert sourceEntries.containsKey(primary == GamePart.COMMON ? 'named/Game.java' : 'named/ClientGame.java')
+            assert !sourceEntries.containsKey(primary == GamePart.COMMON ? 'named/ClientGame.java' : 'named/Game.java')
+            def remap = c.remapJarTask
+            if (remap != null) {
+                def cp = remap.get().classpath.files
+                assert cp.contains(runtime) && cp.containsAll(extras)
+                assert !cp.any { it.path.contains('mixinStripped') || it.name == 'preapplied.jar' }
+            }
+            rows.add([name:c.name, primary:primary.key, games:games*.path, runtime:runtime.path, extras:extras*.path, sources:c.sources.get().asFile.path,
+                producers:[aw:deps(c.finalMinecraftFile), compile:deps(c.compileMinecraftFiles), extra:deps(c.runtimeExtraClasspathFiles)], operations:ops*.path])
+        }
+        if (form == 'unsplit') {
+            assert roles.every { it.runtimeExtraClasspathFiles.get().empty }
+            def include = target.main.includeJarTask.get()
+            assert include.input.get().asFile == target.main.remapJarTask.get().archiveFile.get().asFile
+            def content = entries(include.archiveFile.get().asFile)
+            def nested = content.findAll { k, v -> k.startsWith('META-INF/jars/') && k.endsWith('.jar') }
+            assert nested.size() == 1
+            def nestedEntries = [:]
+            new java.util.zip.ZipInputStream(new ByteArrayInputStream(nested.values().first())).withCloseable { zip ->
+                for (def entry = zip.nextEntry; entry != null; entry = zip.nextEntry) {
+                    if (!entry.directory) nestedEntries[entry.name] = zip.readAllBytes()
+                }
+            }
+            // The existing include transform adds Fabric metadata to ordinary libraries.
+            entries(file('repository/ordinary/ref/1/ref-1.jar')).each { name, bytes -> assert Arrays.equals(bytes, nestedEntries[name]) : name }
+            assert nestedEntries.containsKey('fabric.mod.json')
+            def outgoing = configurations.getByName(target.main.sourceSet.runtimeElementsConfigurationName).outgoing.artifacts.files.files
+            assert outgoing.contains(include.archiveFile.get().asFile)
+        }
+        file('platform-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([form:form, enabled:enabled, roles:rows, graph:gradle.taskGraph.allTasks*.path]))
+        println "VERIFIED_PLATFORM $form $enabled ${roles.size()}"
+    }
+}

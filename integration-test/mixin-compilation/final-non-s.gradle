@@ -1,0 +1,47 @@
+import org.gradle.api.attributes.Attribute
+import earth.terrarium.cloche.target.compilation.MixinPreapplicationKt
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+
+def target = cloche.singleTarget { it.fabric { } }
+def c = target.main
+def C = c.compileConfiguration.get()
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication',String)
+def configs=[]
+['classifier':project.dependencies.create('probe:ref:1:extra'), 'position':project.dependencies.create(project.files('input/non-S/ref-1.jar'))].each { label,dep ->
+    def raw=project.configurations.detachedConfiguration(dep)
+    C.attributes.keySet().each { attr -> raw.attributes.attribute(attr,C.attributes.getAttribute(attr)) }
+    raw.attributes.attribute(state,'raw')
+    def clean=project.configurations.detachedConfiguration(dep.copy())
+    C.attributes.keySet().each { attr -> clean.attributes.attribute(attr,C.attributes.getAttribute(attr)) }
+    clean.attributes.attributeProvider(state,c.preapplicationSide.map { side -> "${project.path}:${target.name}:${c.name}:$side".toString() })
+    configs.add([label:label,raw:raw,clean:clean])
+}
+tasks.register('verifyR5ExactNonS') { t ->
+    MixinPreapplicationKt.dependOnPreapplication(c,t)
+    configs.each { inputs.files(it.raw,it.clean) }
+    doLast {
+        def selected=c.preapplyMixinsTasks.get().first().get().mixinFiles.files
+        def observations=[]
+        configs.each { row ->
+            def raw=row.raw.incoming.artifacts.artifacts.findAll { it.file.name.startsWith('ref-1') }
+            def resolved=row.clean.incoming.artifacts.artifacts.findAll { it.file.name.startsWith('ref-1') }
+            assert raw.size()==1 && resolved.size()==1
+            assert raw[0].id.componentIdentifier==resolved[0].id.componentIdentifier
+            assert raw[0].variant.displayName==resolved[0].variant.displayName
+            assert resolved[0].file==raw[0].file
+            assert !selected.contains(raw[0].file)
+            new ZipFile(raw[0].file).withCloseable { zip -> assert new String(zip.getInputStream(zip.getEntry('ref.json')).bytes,'UTF-8').contains('Ref') }
+            observations.add([label:row.label,raw:raw[0].file.absolutePath,clean:resolved[0].file.absolutePath,component:raw[0].id.componentIdentifier.toString(),variant:raw[0].variant.displayName,artifact:raw[0].id.toString(),sources:selected*.absolutePath])
+        }
+        assert observations.find { it.label=='classifier' }.component=='probe:ref:1'
+        file('r5-exact-non-S.json').text=JsonOutput.prettyPrint(JsonOutput.toJson(observations))
+        println 'VERIFIED_R5_EXACT_NON_S ' + observations.size()
+    }
+}

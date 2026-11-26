@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 
 plugins {
     kotlin("plugin.serialization") version embeddedKotlinVersion
-    id("com.google.devtools.ksp") version embeddedKotlinVersion
+    id("com.google.devtools.ksp") version "2.3.12"
 
     `kotlin-dsl`
     `java-gradle-plugin`
@@ -23,15 +23,31 @@ gradlePlugin {
 }
 
 repositories {
+    exclusiveContent {
+        forRepository {
+            maven("https://raw.githubusercontent.com/SettingDust/minecraft-codev/maven/")
+        }
+        filter {
+            listOf("core", "forge", "fabric", "mixins", "runs", "access-widener", "remapper", "decompiler", "includes").forEach {
+                includeModule("net.msrandom", "minecraft-codev-$it")
+            }
+        }
+    }
+    exclusiveContent {
+        forRepository {
+            maven("https://raw.githubusercontent.com/SettingDust/jvm-multiplatform/maven/")
+        }
+        filter {
+            includeModule("net.msrandom", "classpath-api-stubs")
+        }
+    }
     mavenCentral()
 
     maven(url = "https://maven.fabricmc.net/")
     maven(url = "https://maven.neoforged.net/releases")
     maven(url = "https://maven.msrandom.net/repository/cloche/")
-    maven("https://raw.githubusercontent.com/settingdust/maven/main/repository/")
 
     gradlePluginPortal()
-    mavenLocal()
 }
 
 java {
@@ -40,19 +56,19 @@ java {
 }
 
 dependencies {
-    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.9.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.6.1-dust.1")
-    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.6.3-dust.3")
-    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.7.2")
-    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.6.0-dust.1")
-    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.6.5-dust.1")
+    implementation(group = "net.msrandom", name = "minecraft-codev-core", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-forge", version = "0.1.1+terrarium.0.9.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-fabric", version = "0.1.1+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-mixins", version = "0.1.2+terrarium.0.6.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-runs", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-access-widener", version = "0.1.0+terrarium.0.6.3")
+    implementation(group = "net.msrandom", name = "minecraft-codev-remapper", version = "0.1.0+terrarium.0.7.2")
+    implementation(group = "net.msrandom", name = "minecraft-codev-decompiler", version = "0.1.0+terrarium.0.6.0")
+    implementation(group = "net.msrandom", name = "minecraft-codev-includes", version = "0.1.0+terrarium.0.6.5")
 
     implementation(group = "net.msrandom", name = "class-extensions-gradle-plugin", version = "1.0.12")
-    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6-dust.0")
-    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.12-dust.5")
+    implementation(group = "net.msrandom", name = "jvm-virtual-source-sets", version = "1.3.6")
+    implementation(group = "net.msrandom", name = "classpath-api-stubs", version = "0.1.0+terrarium.0.1.12")
 
     implementation(group = "net.peanuuutz.tomlkt", name = "tomlkt", version = "0.5.0")
     implementation(group = "org.apache.groovy", name = "groovy-toml", version = "5.0.2")
@@ -68,12 +84,15 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(gradleTestKit())
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.9.0-M1")
 }
 
 tasks.compileKotlin {
     compilerOptions {
         jvmDefault = JvmDefaultMode.ENABLE
-        compilerOptions.freeCompilerArgs.add("-Xcontext-receivers")
+        // Keep existing internal JVM names across KGP's module-name default change.
+        moduleName.set(project.name)
+        compilerOptions.freeCompilerArgs.add("-Xcontext-parameters")
     }
 }
 
@@ -105,10 +124,85 @@ publishing {
 
 tasks.test {
     useJUnitPlatform()
+    exclude("**/IncludeTargetIdentityTests*", "**/MixinCompilationTests*", "**/DependencyRemapTests*")
 
     dependsOn(tasks.pluginUnderTestMetadata)
 }
 
+tasks.register<Test>("includeIdentityTest") {
+    doNotTrackState("Uses the installed Gradle without fingerprinting its shared cache and live locks")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    include("**/IncludeTargetIdentityTests*")
+    dependsOn(tasks.pluginUnderTestMetadata)
+    workingDir(layout.projectDirectory)
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+    val reportsDirectory = layout.buildDirectory.dir("reports/test/include-identity")
+    val temporaryDirectory = layout.buildDirectory.dir("tmp/include-identity/tmp")
+    systemProperty("java.io.tmpdir", temporaryDirectory.get().asFile.absolutePath)
+    doFirst {
+        temporaryDirectory.get().asFile.mkdirs()
+        val expected = configurations.implementation.get().dependencies
+            .filter { it.group == "net.msrandom" && it.name.startsWith("minecraft-codev-") }
+            .associate { it.name to it.version }
+        check(expected.size == 9)
+        val published = listOf("compileClasspath", "runtimeClasspath").flatMap { name ->
+            val artifacts = configurations.getByName(name).incoming.artifacts.artifacts
+            expected.flatMap { (module, version) ->
+                val selected = artifacts.filter {
+                    val id = it.id.componentIdentifier as? org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    id?.group == "net.msrandom" && id.module == module
+                }
+                check(selected.size == 1) { "Expected one published $name dependency for $module: $artifacts" }
+                selected.map { artifact ->
+                    val id = artifact.id.componentIdentifier as org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                    check(id.version == version) { "Unexpected $name version: $id, expected $version" }
+                    check(artifact.file.isFile && artifact.file.name == "$module-$version.jar") { "Not a published JAR: $artifact" }
+                    "$name $id ${artifact.file.canonicalPath}"
+                }
+            }
+        }
+        reportsDirectory.get().asFile.mkdirs()
+        reportsDirectory.get().file("compile-classpath.txt").asFile.writeText(published.joinToString("\n", postfix = "\n"))
+    }
+    inputs.dir(layout.projectDirectory.dir("integration-test/include-identity"))
+    systemProperty("fixture.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
+    systemProperty("org.gradle.testkit.dir", gradle.gradleUserHomeDir.absolutePath)
+    providers.gradleProperty("org.gradle.java.installations.paths").orNull
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { systemProperty("org.gradle.java.installations.paths", it) }
+}
+
+tasks.register<Test>("mixinCompilationTest") {
+    // The local Gradle installation contains its shared .gradle; never snapshot that tree as a test input.
+    doNotTrackState("Runs fresh private TestKit builds without fingerprinting the installation's shared cache")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    include("**/MixinCompilationTests*")
+    dependsOn(tasks.pluginUnderTestMetadata)
+    workingDir(layout.projectDirectory)
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+    systemProperty("fixture.metadata", layout.buildDirectory.file("pluginUnderTestMetadata/plugin-under-test-metadata.properties").get().asFile.absolutePath)
+    inputs.dir(layout.projectDirectory.dir("integration-test/mixin-compilation"))
+}
+
+tasks.register<Test>("dependencyRemapTest") {
+    doNotTrackState("Validates first production in isolated Gradle user homes")
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    include("**/DependencyRemapTests*")
+    dependsOn(tasks.pluginUnderTestMetadata)
+    systemProperty("fixture.metadata", tasks.pluginUnderTestMetadata.get().outputDirectory.file("plugin-under-test-metadata.properties").get().asFile.absolutePath)
+    systemProperty("fixture.gradleHome", gradle.gradleHomeDir!!.absolutePath)
+    systemProperty("fixture.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
+    systemProperty("fixture.offline", gradle.startParameter.isOffline)
+    providers.gradleProperty("org.gradle.java.installations.paths").orNull?.let { systemProperty("fixture.toolchains", it) }
+    workingDir(layout.projectDirectory)
+}
+
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
 }

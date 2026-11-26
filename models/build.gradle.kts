@@ -3,6 +3,10 @@ plugins {
     `maven-publish`
 }
 
+kotlin {
+    jvmToolchain(25)
+}
+
 repositories {
     mavenCentral()
 }

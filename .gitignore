@@ -5,6 +5,7 @@ build/
 
 ### IntelliJ IDEA ###
 .idea
+/.intellijPlatform/
 *.iws
 *.iml
 *.ipr
@@ -38,3 +39,6 @@ bin/
 
 ### Kotlin compiler ###
 **/.kotlin/
+
+### Python ###
+__pycache__/

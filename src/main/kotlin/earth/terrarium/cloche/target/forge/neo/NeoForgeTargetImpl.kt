@@ -3,6 +3,8 @@ package earth.terrarium.cloche.target.forge.neo
 import earth.terrarium.cloche.api.target.NeoforgeTarget
 import earth.terrarium.cloche.target.compilation.CompilationInternal
 import earth.terrarium.cloche.target.forge.ForgeLikeTargetImpl
+import earth.terrarium.cloche.target.forge.LoaderModule
+import earth.terrarium.cloche.target.forge.neoForgeModuleVersion
 import earth.terrarium.cloche.target.compilation.localImplementationConfigurationName
 import earth.terrarium.cloche.tasks.data.decodeFromStream
 import earth.terrarium.cloche.tasks.data.encodeToStream
@@ -47,21 +49,9 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
         }
 
     init {
-        group.convention("net.neoforged")
-        artifact.convention("neoforge")
+        group.convention(LoaderModule.NEOFORGE.group)
+        artifact.convention(LoaderModule.NEOFORGE.artifact)
 
-        minecraftLibrariesConfiguration.attributes {
-            attribute(NEOFORGE_DISTRIBUTION_ATTRIBUTE, "client")
-
-            attribute(
-                NEOFORGE_OPERATING_SYSTEM_ATTRIBUTE,
-                operatingSystemName(),
-            )
-        }
-
-        resolvePatchedMinecraft.configure {
-            neoforge.set(true)
-        }
 
         resolvableAttributes(::addAttributes)
 
@@ -94,7 +84,7 @@ internal abstract class NeoForgeTargetImpl @Inject constructor(name: String) : F
     }
 
     final override fun version(minecraftVersion: String, loaderVersion: String) =
-        loaderVersion
+        neoForgeModuleVersion(minecraftVersion, loaderVersion)
 
     override fun registerAccessWidenerMergeTask(compilation: CompilationInternal) {
         super.registerAccessWidenerMergeTask(compilation)

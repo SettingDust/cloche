@@ -1,0 +1,88 @@
+initscript {
+ dependencies { classpath files(
+ 'D:/Applications/Scoop/apps/idea/current/IDE/plugins/gradle-plugin/lib/gradle-tooling-extension-api.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/plugins/gradle-plugin/lib/gradle-tooling-extension-impl.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/lib/util.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/lib/util-8.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/lib/util_rt.jar',
+ 'D:/Applications/Scoop/apps/gradle/current/lib/guava-33.4.6-jre.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/lib/external-system-rt.jar',
+ 'D:/Applications/Scoop/apps/gradle/current/lib/commons-lang3-3.20.0.jar',
+ 'D:/Applications/Scoop/apps/idea/current/IDE/lib/annotations.jar') }
+}
+import org.gradle.tooling.provider.model.*
+import groovy.json.JsonOutput
+
+class ObservationBuilder implements ToolingModelBuilder {
+ final def idea = Class.forName('com.intellij.gradle.toolingExtension.impl.modelBuilder.ExtraModelBuilder').getDeclaredConstructor().newInstance()
+ boolean canBuild(String name) { name == 'R4Tooling$Observation' }
+ static Object dump(Object value, IdentityHashMap seen) {
+  if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) return value
+  if (value instanceof File) return value.absolutePath
+  if (value instanceof Enum) return value.toString()
+  if (value instanceof Map) return value.collectEntries { k,v -> [(k.toString()): dump(v, seen)] }
+  if (value instanceof Iterable) return value.collect { dump(it, seen) }
+  if (value.class.isArray()) return value.collect { dump(it, seen) }
+  if (seen.containsKey(value)) return ['$ref':seen.get(value)]
+  def result = ['$id':seen.size()+1, '$type':value.class.name]
+  seen.put(value, result['$id'])
+  value.class.methods.findAll { it.parameterCount == 0 && (it.name.startsWith('get') || it.name.startsWith('is')) && !(it.name in ['getClass','getMetaClass']) }.sort { it.name }.each { m ->
+   result[m.name] = dump(m.invoke(value), seen)
+  }
+  return result
+ }
+ Object buildAll(String name, org.gradle.api.Project root) {
+  def projects = root.rootProject.allprojects
+  def builderCalls = []
+  def request = { p,n -> assert idea.canBuild(n); println 'R4M_BUILDER ' + p.path + ' ' + n; builderCalls << [project:p.path, model:n]; idea.buildAll(n,p) }
+  projects.each { request(it, 'com.intellij.gradle.toolingExtension.impl.model.dependencyDownloadPolicyModel.GradleDependencyDownloadPolicy') }
+  projects.each { request(it, 'com.intellij.gradle.toolingExtension.impl.model.sourceSetArtifactIndex.GradleSourceSetArtifactBuildRequest') }
+  def models = [:]
+  projects.each { p -> models[p.path] = [sourceSets:request(p,'org.jetbrains.plugins.gradle.model.GradleSourceSetModel')] }
+  projects.each { p -> models[p.path].dependencies = request(p,'org.jetbrains.plugins.gradle.model.GradleSourceSetDependencyModel') }
+  def field = idea.class.getDeclaredField('modelBuilderContext'); field.accessible = true
+  def index = Class.forName('com.intellij.gradle.toolingExtension.impl.model.sourceSetArtifactIndex.GradleSourceSetArtifactIndex').getInstance(field.get(idea).get())
+  def indexMaps = [:]
+  ['mySourceSetArtifactMap','mySourceSetOutputArtifactMap'].each { key ->
+   def f = index.class.getDeclaredField(key); f.accessible = true
+   indexMaps[key] = f.get(index).collectEntries { k,v -> [(k):v instanceof org.gradle.api.tasks.SourceSet ? v.name : v] }
+  }
+  def lookups = []
+  def configurations = [:]
+  def sourceSetIdentities = [:]
+  def nativeViews = [:]
+  projects.each { p ->
+   def sets = p.extensions.findByName('sourceSets')
+   sets?.each { s ->
+    sourceSetIdentities[p.path + ':' + s.name] = [build:p.rootDir.path, project:p.path, name:s.name, output:s.output.files*.path, sources:s.allSource.srcDirs*.path]
+    s.output.files.each { file ->
+     def artifact = index.findArtifactBySourceSetOutputDir(file.path)
+     lookups << [project:p.path, sourceSet:s.name, output:file.path, exists:file.exists(), direct:index.findByArtifact(file.path)?.name, artifact:artifact, throughArtifact:artifact == null ? null : index.findByArtifact(artifact)?.name]
+    }
+    def compileConfiguration = p.configurations.getByName(s.compileClasspathConfigurationName)
+    def view = compileConfiguration.incoming.artifactView { componentFilter { !(it instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier) } }.files
+    def producers = { f -> f.buildDependencies.getDependencies(null)*.path.sort() }
+    nativeViews[p.path + ':' + s.name] = [C:compileConfiguration.files*.path, view:view.files*.path,
+      sourceSet:s.compileClasspath.files*.path, Cdeps:producers(compileConfiguration), viewDeps:producers(view), sourceSetDeps:producers(s.compileClasspath)]
+    [s.compileClasspathConfigurationName,s.runtimeClasspathConfigurationName].each { cn ->
+     def c = p.configurations.getByName(cn)
+     configurations[p.path+':'+cn] = [attributes:c.attributes.keySet().collectEntries { [(it.name):c.attributes.getAttribute(it).toString()] },
+      artifacts:cn == s.compileClasspathConfigurationName ? c.incoming.artifacts.artifacts.collect { a -> [id:a.id.displayName, component:a.id.componentIdentifier.displayName, variant:a.variant.displayName, attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] }, file:a.file.path, exists:a.file.exists()] } : null,
+      dependencies:c.incoming.resolutionResult.allDependencies.collect { d -> [from:d.from.id.displayName, requested:d.requested.displayName, selected:d.hasProperty('selected') ? d.selected.id.displayName : null] },
+      producers:c.buildDependencies.getDependencies(null).collect { it.path }]
+    }
+   }
+  }
+  println 'R4M_STRICT_READ_COMPLETE ' + nativeViews.keySet()
+  def json = JsonOutput.prettyPrint(JsonOutput.toJson([buildRoot:root.rootDir.path, resolveSourceSetDependencies:System.getProperty('idea.resolveSourceSetDependencies'), gradle:root.gradle.gradleVersion, java:System.getProperty('java.home'), home:root.gradle.gradleUserHomeDir.path, builder:idea.class.protectionDomain.codeSource.location.toString(), builderCalls:builderCalls, sourceSetIdentities:sourceSetIdentities, models:dump(models,new IdentityHashMap()), index:indexMaps, lookups:lookups, configurations:configurations, nativeViews:nativeViews]))
+  return new ObservationValue(json)
+ }
+}
+class ObservationValue implements Serializable {
+ final String json
+ ObservationValue(String json) { this.json = json }
+ String getJson() { json }
+}
+gradle.projectsLoaded {
+ gradle.rootProject.services.get(ToolingModelBuilderRegistry).register(new ObservationBuilder())
+}

@@ -1,0 +1,194 @@
+import earth.terrarium.cloche.ClochePlugin
+import net.msrandom.stubs.GenerateStubApi
+import net.msrandom.virtualsourcesets.SourceSetStaticLinkageInfo
+import org.gradle.api.provider.Provider
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.attributes.LibraryElements
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+group = 'probe'; version = '1'
+apply plugin: ClochePlugin
+cloche.metadata.modId.set('common_relations')
+def mode = providers.gradleProperty('commonRelations').get()
+def left = cloche.fabric('left') { minecraftVersion.set('1.20.1'); loaderVersion.set('0.16.0'); mixinPreapplication.set(false) }
+def right = cloche.fabric('right') { minecraftVersion.set('1.20.2'); loaderVersion.set('0.16.0'); mixinPreapplication.set(false) }
+def common = cloche.common('common')
+def missing = mode.startsWith('missing-')
+if (!missing) {
+    left.data.configure { }; left.getTest().configure { }
+    right.data.configure { }; right.getTest().configure { }
+}
+left.client.configure { }
+def lc = left.client.value.get()
+if (mode == 'existing') { lc.data.configure { }; lc.getTest().configure { } }
+common.data.configure { }; common.getTest().configure { }
+common.client.configure { c -> c.data.configure { }; c.getTest().configure { } }
+def cc = common.client.value.get()
+right.includedClient.configure { }
+def stubs = [tasks.named('createCommonClientDataApiStub', GenerateStubApi).get(), tasks.named('createCommonClientTestApiStub', GenerateStubApi).get()]
+// Keep the original selector-derived Provider; compare its exact preparation objects without resolving files.
+def participants = stubs.collect { s -> def providers = s.dependsOn.findAll { it instanceof Provider }; assert providers.size() == 1; providers.first() }
+def consumption = { c -> c.class.methods.find { it.name.startsWith('getCompilationConsumption') }.invoke(c) }
+def snapshot = {
+    def members = [lc.data.value.present, lc.getTest().value.present]
+    def selected = participants.collect { it.get() }
+    assert [lc.data.value.present, lc.getTest().value.present] == members
+    selected
+}
+def runs = missing ? [(mode == 'missing-data' ? left.runs.clientData : left.runs.clientTest).configure()] : [left.runs.clientData.configure(), left.runs.clientTest.configure()]
+def runProviders = runs.collect { it.sourceSet }
+def selections = []
+if (!missing) {
+    def before = snapshot()
+    assert before[0][0].is(consumption(mode == 'existing' ? lc.data.value.get() : lc).preparation)
+    assert before[1][0].is(consumption(mode == 'existing' ? lc.getTest().value.get() : lc).preparation)
+    assert before[0][1].is(consumption(right.data.value.get()).preparation)
+    assert before[1][1].is(consumption(right.getTest().value.get()).preparation)
+    assert runProviders[0].get().is((mode == 'existing' ? lc.data.value.get() : left.data.value.get()).sourceSet)
+    assert runProviders[1].get().is((mode == 'existing' ? lc.getTest().value.get() : left.getTest().value.get()).sourceSet)
+    selections.add([phase:'before', members:[lc.data.value.present, lc.getTest().value.present], runs:runProviders.collect { it.get().name }, common:mode == 'existing' ? ['client:data','client:test'] : ['client','client']])
+    if (mode != 'existing') {
+        assert !lc.data.value.present && !lc.getTest().value.present
+        lc.data.configure { }; lc.getTest().configure { }
+    }
+    def after = snapshot()
+    assert after[0][0].is(consumption(lc.data.value.get()).preparation)
+    assert after[1][0].is(consumption(lc.getTest().value.get()).preparation)
+    assert after[0][1].is(consumption(right.data.value.get()).preparation)
+    assert after[1][1].is(consumption(right.getTest().value.get()).preparation)
+    assert runProviders[0].get().is(lc.data.value.get().sourceSet)
+    assert runProviders[1].get().is(lc.getTest().value.get().sourceSet)
+    selections.add([phase:'after', members:[lc.data.value.present, lc.getTest().value.present], runs:runProviders.collect { it.get().name }, common:['client:data','client:test']])
+}
+// Make inheritance observable with unique values, constraints, and real Gradle artifact producers.
+def compilations = [left.main, lc, right.main]
+if (!missing) compilations.addAll([left.data.value.get(), left.getTest().value.get(), right.data.value.get(), right.getTest().value.get(), lc.data.value.get(), lc.getTest().value.get()])
+compilations.addAll([common.main, common.data.value.get(), common.getTest().value.get(), cc, cc.data.value.get(), cc.getTest().value.get()])
+compilations.each { c ->
+    def marker = c.sourceSet.name
+    def aw = file("markers/${marker}.accesswidener"); aw.parentFile.mkdirs(); aw.text = 'accessWidener v2 named\n'
+    def mixin = file("markers/${marker}.json"); mixin.text = '{}'
+    c.accessWideners.from(aw); c.mixins.from(mixin)
+    def api = configurations.getByName(c.isTest() ? c.sourceSet.implementationConfigurationName : c.sourceSet.apiConfigurationName)
+    api.dependencies.add(dependencies.create("relation:$marker:1"))
+    api.dependencyConstraints.add(dependencies.constraints.create("constraint:$marker:1"))
+    if (c.metaClass.hasProperty(c, 'includeBucketConfiguration')) c.includeBucketConfiguration.configure { dependencies.add(project.dependencies.create("include:$marker:1")) }
+}
+left.dependencies { it.include(right) }
+def cfg = { name -> configurations.getByName(name) }
+def artifacts = { c, runtime, role -> cfg(runtime ? c.sourceSet.runtimeElementsConfigurationName : c.sourceSet.apiElementsConfigurationName).outgoing.variants.getByName(role).artifacts }
+def rows = []
+def observePair = { c, d, data ->
+    assert c.accessWideners.files.containsAll(d.accessWideners.files)
+    assert c.mixins.files.containsAll(d.mixins.files)
+    assert c.includeBucketConfiguration.get().hierarchy.contains(d.includeBucketConfiguration.get())
+    assert c.includeBucketConfiguration.get().allDependencies.toList().containsAll(d.includeBucketConfiguration.get().allDependencies.toList())
+    assert c.dependencyHandler.include.dependencies.get().containsAll(d.dependencyHandler.include.dependencies.get())
+    [c.sourceSet.compileClasspathConfigurationName, c.sourceSet.runtimeClasspathConfigurationName].each { name ->
+        def deps = cfg(name).allDependencies.withType(ProjectDependency).findAll { it.requestedCapabilities.any { cap -> "${cap.group}:${cap.name}:${cap.version}" == d.capability.get() } }
+        assert deps.size() == 1 : [name, d, deps]
+        assert deps.first().attributes.getAttribute(Attribute.of('earth.terrarium.cloche.withoutdata', Boolean)) == (data ? true : null)
+    }
+    if (!c.isTest()) {
+        [false, true].each { runtime ->
+            def consumer = cfg(runtime ? c.sourceSet.runtimeElementsConfigurationName : c.sourceSet.apiElementsConfigurationName)
+            def dependency = cfg(runtime ? d.sourceSet.runtimeElementsConfigurationName : d.sourceSet.apiElementsConfigurationName)
+            assert consumer.allDependencies.toList().containsAll(dependency.allDependencies.toList())
+            assert consumer.allDependencyConstraints.toList().containsAll(dependency.allDependencyConstraints.toList())
+            assert artifacts(c, runtime, LibraryElements.CLASSES)*.file.containsAll(artifacts(d, runtime, LibraryElements.CLASSES)*.file)
+        }
+        assert artifacts(c, true, LibraryElements.RESOURCES)*.file.containsAll(artifacts(d, true, LibraryElements.RESOURCES)*.file)
+    } else {
+        assert configurations.findByName(c.sourceSet.name + 'ApiElements') == null
+        assert configurations.findByName(c.sourceSet.name + 'RuntimeElements') == null
+    }
+    rows.add([consumer:c.toString(), dependency:d.toString(), data:data, aw:c.accessWideners.files*.name, mixins:c.mixins.files*.name])
+}
+if (!missing) {
+    tasks.register('verifyCommonRelations') {
+        doLast {
+            observePair(lc, left.main, false)
+            observePair(left.data.value.get(), left.main, true)
+            observePair(left.getTest().value.get(), left.main, false)
+            [lc.data.value.get(), lc.getTest().value.get()].each { c ->
+                [lc, left.main, c.name.endsWith('data') ? left.data.value.get() : left.getTest().value.get()].each { d ->
+                    if (d.isTest()) {
+                        assert c.sourceSet.compileClasspath.sources.contains(d.sourceSet.output)
+                        assert c.sourceSet.runtimeClasspath.sources.contains(d.sourceSet.output)
+                        rows.add([consumer:c.toString(), dependency:d.toString(), nativeTestOutput:d.sourceSet.output.files*.path])
+                    } else observePair(c, d, c.name.endsWith('data'))
+                }
+            }
+            [left.main, lc, right.main].each { c ->
+                def normal = artifacts(c, true, LibraryElements.RESOURCES)
+                def without = cfg(c.sourceSet.runtimeElementsConfigurationName).outgoing.variants.getByName('resourcesWithoutData')
+                assert without.attributes.getAttribute(Attribute.of('earth.terrarium.cloche.withoutdata', Boolean)) == true
+                assert without.artifacts*.file.toSet() == normal.findAll { !c.generatedResourceOutputs.contains(it.file) }.collect { it.file }.toSet()
+                assert !without.artifacts.any { c.generatedResourceOutputs.contains(it.file) }
+                rows.add([owner:c.toString(), resources:normal*.file*.path, withoutData:without.artifacts*.file*.path])
+            }
+            def sourcePairs = [[left.main, common.main], [right.main, common.main], [right.main, cc], [right.data.value.get(), cc.data.value.get()], [right.getTest().value.get(), cc.getTest().value.get()], [lc, cc], [left.data.value.get(), common.data.value.get()], [left.getTest().value.get(), common.getTest().value.get()], [lc.data.value.get(), cc.data.value.get()], [lc.getTest().value.get(), cc.getTest().value.get()]]
+            sourcePairs.each { c, d ->
+                assert c.sourceSet.extensions.getByType(SourceSetStaticLinkageInfo).links.contains(d.sourceSet)
+                assert c.accessWideners.files.containsAll(d.accessWideners.files)
+                assert c.mixins.files.containsAll(d.mixins.files)
+                def annotations = cfg(c.sourceSet.compileOnlyConfigurationName).allDependencies.collect { "${it.group}:${it.name}:${it.version}".toString() }
+                assert annotations.containsAll(['net.msrandom:java-expect-actual-annotations:1.0.0', 'net.msrandom:class-extension-annotations:1.0.0'])
+                def processors = cfg(c.sourceSet.annotationProcessorConfigurationName).allDependencies.collect { "${it.group}:${it.name}:${it.version}".toString() }
+                assert processors.containsAll(['net.msrandom:java-expect-actual-processor:1.0.9', 'net.msrandom:java-class-extensions-processor:1.0.1'])
+                ['api', 'compileOnlyApi', 'implementation', 'compileOnly'].each { role ->
+                    def name = c.sourceSet.name + role.capitalize()
+                    def parent = (d.sourceSet.name == 'main' ? '' : d.sourceSet.name) + (d.sourceSet.name == 'main' ? 'common' : 'Common') + role.capitalize()
+                    if (c.isTest() && role in ['api','compileOnlyApi']) assert configurations.findByName(name) == null
+                    else assert cfg(name).hierarchy.contains(cfg(parent)) : [name,parent]
+                }
+                ['runtimeOnly','localRuntime','localImplementation','externalRuntime','externalCompile','externalApi'].each { role ->
+                    def suffix = role.capitalize()
+                    assert cfg(c.sourceSet.name + suffix).hierarchy.contains(cfg(d.sourceSet.name == 'main' ? role : d.sourceSet.name + suffix))
+                }
+                ['implementation','api','compileOnly','compileOnlyApi','runtimeOnly','localRuntime','localImplementation'].each { role ->
+                    def consumer = 'mod' + (c.sourceSet.name + role.capitalize()).capitalize()
+                    def parent = 'mod' + (d.sourceSet.name == 'main' ? role : d.sourceSet.name + role.capitalize()).capitalize()
+                    if (c.isTest() && role in ['api','compileOnlyApi']) assert configurations.findByName(consumer) == null
+                    else assert cfg(consumer).hierarchy.contains(cfg(parent))
+                }
+                rows.add([source:c.sourceSet.name, staticDependency:d.sourceSet.name])
+            }
+            def weak = right.main.sourceSet.extensions.getByType(SourceSetStaticLinkageInfo)
+            [[cc, common.main], [cc.data.value.get(), common.data.value.get()], [cc.getTest().value.get(), common.getTest().value.get()]].each { c, d ->
+                assert weak.weakTreeLinks(c.sourceSet).get().contains(d.sourceSet)
+                rows.add([weak:c.toString(), dependency:d.toString()])
+            }
+            def commonPairs = [[cc, common.main], [common.data.value.get(), common.main], [common.getTest().value.get(), common.main], [cc.data.value.get(), cc], [cc.data.value.get(), common.main], [cc.data.value.get(), common.data.value.get()], [cc.getTest().value.get(), cc], [cc.getTest().value.get(), common.main]]
+            commonPairs.each { c, d ->
+                assert c.accessWideners.files.containsAll(d.accessWideners.files)
+                assert c.mixins.files.containsAll(d.mixins.files)
+                def deps = cfg(c.sourceSet.compileOnlyConfigurationName).allDependencies.withType(ProjectDependency).findAll { it.requestedCapabilities.any { cap -> "${cap.group}:${cap.name}:${cap.version}" == d.capability.get() } }
+                assert deps.size() == 1
+                if (!c.isTest()) {
+                    def outgoing = cfg(c.sourceSet.apiElementsConfigurationName)
+                    def parent = cfg(d.sourceSet.apiElementsConfigurationName)
+                    assert outgoing.allDependencies.toList().containsAll(parent.allDependencies.toList())
+                    assert outgoing.allDependencyConstraints.toList().containsAll(parent.allDependencyConstraints.toList())
+                    assert outgoing.outgoing.artifacts.files.files.contains(tasks.named(d.sourceSet.jarTaskName).get().archiveFile.get().asFile)
+                }
+                rows.add([common:c.toString(), dependency:d.toString(), outgoing:!c.isTest()])
+            }
+            assert !cc.isTest()
+            def test = cc.getTest().value.get()
+            assert test.sourceSet.compileClasspath.sources.contains(common.getTest().value.get().sourceSet.output)
+            assert test.sourceSet.runtimeClasspath.sources.contains(common.getTest().value.get().sourceSet.output)
+            file('common-relations-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([mode:mode, selections:selections, relations:rows]))
+            println 'VERIFIED_COMMON_RELATIONS ' + mode
+        }
+    }
+}

@@ -1,0 +1,79 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def left = cloche.targets.getByName('left')
+def right = cloche.targets.getByName('right')
+def lc = left.client.value.get()
+def lt = left.getTest().value.get()
+def lct = lc.getTest().value.get()
+// Neutral shared fixture source; native target consumers below exercise their own API and project outputs.
+file('src/main/java/Consume.java').text = 'public class Consume { named.Game game; }'
+def roles = [(left.main):'Main', (left.data.value.get()):'Data', (lt):'Test', (lc):'Client', (lct):'ClientTest']
+roles.each { c, label ->
+    def source = file('src/left/' + c.name.replace(':', '/') + '/java/Native' + label + '.java')
+    source.parentFile.mkdirs()
+    source.text = 'public class Native' + label + ' { probe.Ref api(named.Game g) { return g; } ' +
+        (label == 'Main' ? '' : 'NativeMain parent; ') +
+        (label == 'ClientTest' ? 'NativeTest testParent; ' : '') +
+        (label.startsWith('Client') ? 'probe.Client client(named.ClientGame g) { return g; } ' : '') + '}'
+}
+def sources = [lc, lt]
+def before = [:]
+sources.each { c ->
+    def producers = project.files(c.sources).buildDependencies.getDependencies(null)
+    assert producers.size() == 1
+    def decompile = producers.first()
+    decompile.doFirst {
+        assert decompile instanceof Decompile
+        before[c.toString()] = [input:decompile.inputFile.get().asFile.path, classpath:decompile.classpath.files*.path]
+        assert decompile.inputFile.get() == selectedGame(c)
+        assert decompile.classpath.files.containsAll(c.compileConfiguration.get().files)
+    }
+}
+tasks.register('verifyProjectConsumers') {
+    dependsOn roles.keySet().collect { it.sourceSet.compileJavaTaskName }
+    inputs.files(sources.collect { it.sources })
+    doLast {
+        def rows = []
+        roles.each { c, label ->
+            def compile = tasks.named(c.sourceSet.compileJavaTaskName).get()
+            assert new File(compile.destinationDirectory.get().asFile, 'Native' + label + '.class').isFile()
+            def projectView = c.compileConfiguration.get().incoming.artifactView { componentFilter { it instanceof ProjectComponentIdentifier } }
+            def nativeFiles = projectView.files.files
+            assert nativeFiles.every { !it.name.endsWith('.jar') }
+            if (label != 'Main') assert c.sourceSet.compileClasspath.files.containsAll(left.main.sourceSet.output.classesDirs.files)
+            if (label == 'ClientTest') {
+                assert c.sourceSet.compileClasspath.files.containsAll(lt.sourceSet.output.files)
+                assert c.sourceSet.runtimeClasspath.files.containsAll(lt.sourceSet.output.files)
+                assert !configurations.names.contains('leftTestApiElements')
+            }
+            def runtime = c.sourceSet.runtimeClasspath.files
+            assert runtime.contains(c.finalMinecraftFile.get().asFile)
+            assert !runtime.any { it.path.contains('mixinStripped') || it.path.contains('preapplication-client') }
+            assert !runtime.contains(selectedGame(c).asFile)
+            rows.add([compilation:c.toString(), compileTask:compile.path, output:compile.destinationDirectory.get().asFile.path,
+                nativeFiles:nativeFiles*.path, nativeProducers:projectView.files.buildDependencies.getDependencies(null)*.path.sort(), runtime:runtime*.path])
+        }
+        sources.each { c ->
+            new ZipFile(c.sources.get().asFile).withCloseable { z ->
+                if (c == lc) {
+                    assert z.getEntry('named/Game.java') == null
+                    assert z.getInputStream(z.getEntry('named/ClientGame.java')).getText('UTF-8').contains('implements Client')
+                } else {
+                    assert z.getInputStream(z.getEntry('named/Game.java')).getText('UTF-8').contains('implements Ref')
+                    assert z.getEntry('named/ClientGame.java') == null
+                }
+            }
+        }
+        file('project-consumer-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([compilation:rows, sources:before]))
+        println 'VERIFIED_PROJECT_CONSUMERS ' + roles.size() + ' ' + sources.size()
+    }
+}

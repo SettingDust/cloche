@@ -1,0 +1,142 @@
+import earth.terrarium.cloche.target.compilation.GamePart
+import net.msrandom.minecraftcodev.decompiler.task.Decompile
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.accesswidener.AccessWiden
+import org.gradle.api.attributes.Attribute
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.tree.ClassNode
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def joined = providers.gradleProperty('sourceForm').get() == 'joined'
+def target = joined ? cloche.singleTarget { c -> c.forge { } } : cloche.singleTarget { c -> c.fabric { } }
+def form = providers.gradleProperty('sourceForm').get()
+def fault = providers.gradleProperty('sourceFault').getOrElse('')
+def registered = tasks.withType(Decompile).names.toSet()
+if (form == 'included') {
+    def oldOutput = tasks.named('decompileMinecraft', Decompile).get().outputFile.get().asFile.name
+    assert target.main.info.primaryGame.get() == GamePart.COMMON
+    target.includedClient()
+    assert target.main.info.primaryGame.get() == GamePart.CLIENT
+    assert tasks.withType(Decompile).names.toSet() == registered
+    assert oldOutput == 'minecraft-1.20.1-named-sources.jar'
+    assert tasks.named('decompileMinecraft', Decompile).get().outputFile.get().asFile.name == 'minecraft-1.20.1-client-named-sources.jar'
+}
+def roles = [target.main]
+if (form == 'split') {
+    // The client keeps the native main-output dependency; main has no compiler consumer in this sources fixture.
+    sourceSets.main.java.setSrcDirs([])
+    sourceSets.main.kotlin.setSrcDirs([])
+    target.client.configure { }
+    roles.add(target.client.value.get())
+}
+file('input/source-library').mkdirs()
+file('input/source-library/ordinary.txt').text = 'native source-only producer'
+def library = tasks.register('produceSourcesLibrary', Jar) {
+    from('input/source-library')
+    destinationDirectory.set(layout.buildDirectory.dir('source-library'))
+    archiveFileName.set('sources-library.jar')
+    doFirst { if (fault == 'library') throw new GradleException('sources_library_failure') }
+}
+def awProducers = []
+roles.eachWithIndex { c, index ->
+    def producer = tasks.register("produceSourcesAw$index") {
+        def output = layout.buildDirectory.file("source-aw/${index}.accesswidener")
+        outputs.file(output)
+        doLast {
+            if (fault == 'aw') throw new GradleException('sources_aw_failure')
+            def f = output.get().asFile
+            f.parentFile.mkdirs()
+            f.text = 'accessWidener v2 named\naccessible class named/Game\n' + (index == 0 ? '' : 'accessible method named/Game namedB ()I\n')
+        }
+    }
+    awProducers.add(producer)
+    c.accessWideners.setFrom(producer.map { it.outputs.files.singleFile })
+    c.dependencies { d ->
+        d.implementation.add(project.files(library.flatMap { it.archiveFile }))
+        if (index != 0) {
+            d.modCompileOnly.add('probe:ref:1')
+            d.modImplementation.add('probe:plain:1')
+            d.implementation.add('ordinary:ref:1')
+        }
+    }
+}
+configurations.matching { it.name.endsWith('Api') || it.name == 'api' }.configureEach {
+    dependencies.removeIf { it.group == 'net.fabricmc' && it.name == 'fabric-loader' }
+}
+configurations.matching { it.name.endsWith('ClientMinecraftLibraries') || it.name == 'clientMinecraftLibraries' }.configureEach {
+    dependencies.add(project.dependencies.create(project.files('input/client-library.jar')))
+}
+def entries = { File f -> new ZipFile(f).withCloseable { z -> z.entries().toList().findAll { !it.directory }.collectEntries { e -> [(e.name):z.getInputStream(e).bytes] } } }
+def publicMethod = { File f, String method ->
+    def node = new ClassNode()
+    new ClassReader(entries(f)['named/Game.class']).accept(node, 0)
+    (node.methods.find { it.name == method }.access & 1) != 0
+}
+tasks.withType(Mixin).configureEach {
+    if (fault == 'strip') {
+        outputs.upToDateWhen { false }
+        doLast { appliedMixins.get().asFile.text = '{broken source-only record' }
+    }
+}
+def rows = []
+roles.eachWithIndex { c, index ->
+    def sourceTasks = project.files(c.sources).buildDependencies.getDependencies(null)
+    assert sourceTasks.size() == 1
+    def decompile = sourceTasks.first()
+    assert decompile instanceof Decompile
+    decompile.doFirst {
+        assert library.get().state.executed && awProducers[index].get().state.executed
+        def enabled = target.mixinPreapplication.get()
+        def games = c.compileMinecraftFiles.get()*.asFile
+        def input = inputFile.get().asFile
+        def client = c.info.primaryGame.get() == GamePart.CLIENT
+        assert input == (!enabled ? c.finalMinecraftFile.get().asFile : client ? games.first() : games.last())
+        def C = c.compileConfiguration.get()
+        def extraLibraries = enabled && c.preapplicationSide.get() == 'CLIENT' ? c.info.preapplicationLibraries.files : []
+        assert classpath.files == (C.files + (games - input) + extraLibraries).toSet()
+        assert classpath.files.contains(library.get().archiveFile.get().asFile)
+        assert (C.attributes.getAttribute(Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)) != null) == enabled
+        if (enabled) {
+            assert c.preapplyMixinsTasks.get().every { it.get().state.executed }
+            assert input != c.finalMinecraftFile.get().asFile
+            if (c.preapplicationSide.get() == 'SERVER') {
+                assert games.size() == 1
+                assert !classpath.files.contains(tasks.named('preapplyClientMixins', Mixin).get().outputFile.get().asFile)
+            }
+            if (client) {
+                assert (games - input).size() == 1
+                def common = (games - input).first()
+                assert publicMethod(common, 'namedB') == (index != 0)
+            }
+        } else {
+            assert input == c.finalMinecraftFile.get().asFile
+            assert !gradle.taskGraph.allTasks.any { it instanceof Mixin }
+        }
+        println 'SOURCES_SELECTION_READY ' + [c.name, c.info.primaryGame.get(), c.preapplicationSide.get(), input, classpath.files]
+        rows.add([compilation:c.name, input:input.path, primary:c.info.primaryGame.get().key, side:c.preapplicationSide.get(), libraries:classpath.files*.path, games:games*.path, output:outputFile.get().asFile.path])
+    }
+}
+tasks.register('verifySourceSelection') {
+    inputs.files(roles.collect { it.sources })
+    doLast {
+        roles.each { c ->
+            def client = c.info.primaryGame.get() == GamePart.CLIENT
+            def content = entries(c.sources.get().asFile)
+            def expected = client ? 'named/ClientGame.java' : 'named/Game.java'
+            assert content.containsKey(expected)
+            assert !content.containsKey(client ? 'named/Game.java' : 'named/ClientGame.java')
+            def source = new String(content[expected], 'UTF-8')
+            if (target.mixinPreapplication.get()) assert source.contains(client ? 'Client' : 'Ref') && source.contains('implements') : source
+        }
+        assert !gradle.taskGraph.allTasks.any { it.path == ':writeLegacyClasspath' }
+        assert gradle.taskGraph.allTasks.findAll { it.path in [':compileJava', ':compileKotlin'] }.every { it.state.noSource }
+        file('source-selection.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([form:form, enabled:target.mixinPreapplication.get(), rows:rows, graph:gradle.taskGraph.allTasks*.path]))
+        println "VERIFIED_SOURCE_SELECTION $form ${target.mixinPreapplication.get()}"
+    }
+}

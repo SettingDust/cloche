@@ -1,0 +1,45 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import groovy.json.JsonOutput
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+// Observe the original sync task after its existing inputs/actions have materialized files; no model request.
+def targets = cloche.targets.findAll { it instanceof MinecraftTargetInternal }
+def compilations = targets.collectMany { t ->
+    def c = t.client.value.orNull
+    [t.main, t.data.value.orNull, t.getTest().value.orNull, c, c?.data?.value?.orNull, c?.getTest()?.value?.orNull].findAll { it != null }
+}
+tasks.named('clocheIdeSync') {
+    doLast {
+        def rows = compilations.collect { c ->
+            def compileView = c.compileConfiguration.get().incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+            def runtimeView = configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+            def game = selectedGame(c).asFile
+            def rawGame = c.finalMinecraftFile.get().asFile
+            assert c.compileMinecraftFiles.get().every { it.asFile.isFile() } && rawGame.isFile()
+            assert compileView.files.files.every { it.isFile() }
+            assert runtimeView.files.files.every { it.isFile() }
+            assert !runtimeView.files.files.any { it.path.contains('mixinStripped') }
+            assert c.runtimeExtraClasspathFiles.get().every { it.asFile.isFile() }
+            assert inputs.files.files.containsAll(c.compileMinecraftFiles.get()*.asFile + [rawGame] + compileView.files.files + runtimeView.files.files + c.runtimeExtraClasspathFiles.get()*.asFile)
+            [compilation:c.toString(), game:game.path, games:c.compileMinecraftFiles.get()*.asFile*.path, runtimeGame:rawGame.path, compile:compileView.files.files*.path,
+                runtime:runtimeView.files.files*.path, runtimeExtras:c.runtimeExtraClasspathFiles.get()*.asFile*.path]
+        }
+        def stubs = tasks.matching { it.name.startsWith('createCommon') && it.name.endsWith('ApiStub') }
+        assert stubs.size() == 6
+        def stubRows = stubs.collect { s ->
+            def files = fileTree(s.outputDirectory).files
+            assert !files.empty && files.every { it.isFile() }
+            assert inputs.files.files.containsAll(files)
+            [task:s.path, files:files*.path]
+        }
+        assert !gradle.taskGraph.allTasks.any { it.name.startsWith('decompile') }
+        file('full-sync-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([compilations:rows, stubs:stubRows, graph:gradle.taskGraph.allTasks*.path]))
+        println 'VERIFIED_FULL_SYNC ' + rows.size() + ' ' + stubRows.size()
+    }
+}

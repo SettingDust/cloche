@@ -1,0 +1,146 @@
+import earth.terrarium.cloche.target.compilation.GamePart
+import earth.terrarium.cloche.ClochePlugin
+import earth.terrarium.cloche.target.compilation.GameShards
+import net.msrandom.minecraftcodev.forge.task.ResolvePatchedMinecraft
+import net.msrandom.minecraftcodev.forge.task.GenerateForgeClientExtra
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import net.msrandom.minecraftcodev.mixins.StripMixins
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+def metadata = new Properties()
+file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+def pluginFiles = metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator)).collect { file(it) }
+net.msrandom.minecraftcodev.core.MinecraftComponentMetadataRuleKt.getVersionList(
+    new File(gradle.gradleUserHomeDir, 'caches/minecraft-codev').toPath(),
+    'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json', true)
+group = 'probe'
+version = '1'
+apply plugin: ClochePlugin
+repositories { maven { url = uri('repository') }; mavenCentral() }
+def loader = providers.gradleProperty('joinedLoader').get()
+def enabled = providers.gradleProperty('joinedEnabled').get().toBoolean()
+def target = cloche.singleTarget { c -> c."$loader" { t ->
+    t.minecraftVersion.set(loader == 'forge' ? '1.20.1' : '26.1')
+    t.loaderVersion.set('first')
+    t.mixinPreapplication.set(!enabled)
+    t.accessWideners.from(file('input/game.accesswidener'))
+    t.dependencies { d -> d.modCompileOnly.add('probe:ref:1') }
+} }
+cloche.metadata.modId.set('joined_consumer')
+target.mixinPreapplication.set(enabled)
+target.loaderVersion.set('second')
+def c = target.main
+// Only the remote platform inputs are replaced; the original raw task identities and output Providers remain.
+configurations.configureEach {
+    dependencies.removeIf { it.group == 'net.msrandom' && it.name in ['java-expect-actual-annotations', 'class-extension-annotations'] }
+}
+configurations.named('minecraftLibraries') { dependencies.clear() }
+configurations.named('forgeUniversal') { dependencies.clear() }
+configurations.named('patches') { dependencies.clear() }
+configurations.named('mappings') {
+    dependencies.clear()
+    dependencies.add(project.dependencies.create(project.files('input/mappings.tiny')))
+}
+configurations.named(c.sourceSet.apiConfigurationName) {
+    // The unobfuscated NeoForge API normally comes from the remote loader module.
+    dependencies.removeIf { it.group == 'net.neoforged' && it.name == 'neoforge' }
+}
+tasks.withType(ResolvePatchedMinecraft).configureEach {
+    actions.clear()
+    universal.setFrom([]); patches.setFrom([]); libraries.setFrom([])
+    inputs.file('input/common.jar')
+    doLast {
+        def destination = output.get().asFile
+        destination.parentFile.mkdirs()
+        destination.bytes = file('input/common.jar').bytes
+        println "JOINED_RAW_PRODUCED $path $destination"
+    }
+}
+tasks.withType(GenerateForgeClientExtra).configureEach {
+    actions.clear()
+    inputs.file('input/client-library.jar')
+    doLast {
+        def destination = outputFile.get().asFile
+        destination.parentFile.mkdirs()
+        destination.bytes = file('input/client-library.jar').bytes
+        println "JOINED_EXTRA_PRODUCED $path $destination"
+    }
+}
+def legacy = c.class.methods.find { it.name.startsWith('getWriteLegacyClasspath') }.invoke(c)
+def compile = tasks.named(c.sourceSet.compileJavaTaskName)
+compile.configure { source = files('JoinedConsume.java'); options.release.set(17) }
+gradle.taskGraph.whenReady { graph ->
+    def environment = new Properties()
+    file('environment.properties').withInputStream { environment.load(it) }
+    assert gradle.gradleVersion == environment.gradleVersion
+    assert new File(System.getProperty('java.home')).canonicalFile == new File(environment.workerJavaHome).canonicalFile
+    assert gradle.gradleUserHomeDir.canonicalFile == new File(environment.privateHome).canonicalFile
+    println "JOINED_ENV Gradle=${gradle.gradleVersion} JVM=${System.getProperty('java.version')} JavaHome=${System.getProperty('java.home')} Installation=${gradle.gradleHomeDir} Home=${gradle.gradleUserHomeDir}"
+    println 'JOINED_GRAPH ' + graph.allTasks*.path
+    assert graph.allTasks.count { it instanceof Mixin } == (enabled ? 1 : 0)
+}
+tasks.withType(Mixin).configureEach {
+    doFirst {
+        assert side.get() == 'CLIENT'
+        [Mixin, StripMixins, Class.forName('net.msrandom.minecraftcodev.mixins.ProduceMixinsKt'), Class.forName('net.msrandom.minecraftcodev.mixins.MixinRuntimeFailure')].each { type ->
+            def source = new File(type.protectionDomain.codeSource.location.toURI())
+            assert source.bytes == pluginFiles.find { it.name.startsWith('minecraft-codev-mixins-') }.bytes
+            println "JOINED_CODE_SOURCE ${type.name} $source"
+        }
+        assert StripMixins.Parameters.getMethod('getRemovalsFile').returnType == org.gradle.api.file.ConfigurableFileCollection
+        assert implementationClasspath.files.count { it.name.startsWith('minecraft-codev-mixins-') } == 1
+        assert implementationClasspath.files.any { it.name == 'sponge-mixin-0.15.0+mixin.0.8.7.jar' }
+        println 'JOINED_IMPLEMENTATION ' + implementationClasspath.files
+    }
+}
+tasks.register('verifyJoinedConsumption') {
+    dependsOn compile, legacy
+    doLast {
+        assert c.info.namedGames instanceof GameShards.Joined
+        assert c.info.primaryGame.get() == GamePart.JOINED
+        assert c.preapplicationSide.get() == 'CLIENT'
+        assert c.compileMinecraftFiles.get().size() == 1
+        def operation = c.preapplyMixinsTasks.get().first().get()
+        def runtimeGame = c.finalMinecraftFile.get().asFile
+        def compileGame = c.compileMinecraftFiles.get().first().asFile
+        assert (runtimeGame != compileGame) == enabled
+        assert file('build/classes/java/main/JoinedConsume.class').isFile()
+        def classpath = legacy.get().classpath.files
+        assert classpath.contains(tasks.withType(GenerateForgeClientExtra).toList().first().outputFile.get().asFile)
+        if (loader == 'forge') assert classpath.contains(runtimeGame)
+        assert !classpath.contains(operation.outputFile.get().asFile)
+        assert !classpath.contains(compileGame) || !enabled && loader == 'forge'
+        assert legacy.get().output.get().asFile.readLines().toSet() == classpath*.absolutePath.toSet()
+        def ref = c.compileConfiguration.get().files.find { it.name.startsWith('ref-1') }
+        new ZipFile(ref).withCloseable { zip ->
+            def json = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('ref.json')))
+            assert json.mixins == (enabled ? [] : ['Ref'])
+            assert json.server == ['Unapplied']
+        }
+        if (enabled) {
+            assert operation.outputFile.get().asFile.exists() && operation.appliedMixins.get().asFile.exists()
+            new ZipFile(compileGame).withCloseable { zip ->
+                def json = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('ref.json')))
+                assert json.mixins == ['Unapplied']
+            }
+        }
+        new ZipFile(runtimeGame).withCloseable { zip ->
+            def json = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('ref.json')))
+            assert json.mixins == ['Ref', 'Unapplied']
+        }
+        file('joined-consumption.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            loader:loader, enabled:enabled, compile:compileGame.path, runtime:runtimeGame.path,
+            legacy:classpath*.path, writer:legacy.get().path,
+            raw:tasks.withType(ResolvePatchedMinecraft).toList().first().output.get().asFile.path,
+            records:enabled ? operation.appliedMixins.get().asFile.text : null,
+        ]))
+        println "VERIFIED_JOINED_CONSUMPTION $loader $enabled"
+    }
+}

@@ -1,0 +1,86 @@
+def selectedGame = { c -> c.compileMinecraftFiles.get()[c.name.startsWith('client') ? 0 : -1] }
+import earth.terrarium.cloche.target.MinecraftTargetInternal
+import net.msrandom.minecraftcodev.mixins.task.Mixin
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+
+buildscript {
+    def metadata = new Properties()
+    file(providers.gradleProperty('clocheClasspathMetadata').get()).withInputStream { metadata.load(it) }
+    dependencies { classpath files(metadata.getProperty('implementation-classpath').split(java.util.regex.Pattern.quote(File.pathSeparator))) }
+}
+apply from: 'artifact-identity.gradle'
+// This observer serves the formal same-request model check; it leaves native consumers intact.
+idea.module.downloadSources = false
+def targets = cloche.targets.findAll { it instanceof MinecraftTargetInternal }
+def left = targets.find { it.name == 'left' }
+def right = targets.find { it.name == 'right' }
+def common = cloche.commonTargets.getByName('common')
+def lc = left.client.value.get()
+def cc = common.client.value.get()
+def expected = [(common.main):[left.main,right.main], (common.data.value.get()):[left.data.value.get(),right.data.value.get()],
+    (common.getTest().value.get()):[left.getTest().value.get(),right.main], (cc):[lc,right.main],
+    (cc.data.value.get()):[lc,right.data.value.get()], (cc.getTest().value.get()):[lc.getTest().value.get(),right.main]]
+def participants = expected.values().flatten().unique()
+def state = Attribute.of('earth.terrarium.cloche.mixinPreapplication', String)
+def deps = { f -> project.files(f).buildDependencies.getDependencies(null)*.path.sort() }
+def artifact = { a -> [id:a.id.displayName, component:a.id.componentIdentifier.displayName, variant:a.variant.displayName,
+    attributes:a.variant.attributes.keySet().collectEntries { [(it.name):a.variant.attributes.getAttribute(it).toString()] }, file:a.file.path] }
+def parameters = [:]
+gradle.taskGraph.whenReady {
+    participants.each { c -> parameters[c.toString()] = [operation:c.preapplyMixinsTasks.get().first().get().path,
+        notification:deps(c.preapplyMixinsTasks.get().collect { it.flatMap { producer -> producer.appliedMixins } }), game:deps(c.compileMinecraftFiles),
+        C:deps(c.compileConfiguration.get()), sourceSet:deps(c.sourceSet.compileClasspath)] }
+}
+tasks.named('clocheIdeSync') {
+    doLast {
+        def rows = participants.collect { c ->
+            def C = c.compileConfiguration.get()
+            def view = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }
+            def raw = C.incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) }; attributes.attribute(state,'raw') }
+            def op = c.preapplyMixinsTasks.get().first().get()
+            def clean = []
+            if (c.target.mixinPreapplication.get()) {
+                assert op.appliedMixins.get().asFile.isFile()
+                op.mixinFiles.each { original ->
+                    def input = raw.artifacts.artifacts.find { it.file == original }
+                    assert input != null
+                    def selected = matchCleanArtifact(input, view.artifacts.artifacts)
+                    clean << [raw:original.path, clean:selected.file.path, rawArtifact:artifact(input), cleanArtifact:artifact(selected)]
+                }
+            } else {
+                assert C.attributes.getAttribute(state) == null
+                assert !gradle.taskGraph.allTasks.any { it.path.startsWith(':preapplyRight') || it.path.startsWith(':joinRight') }
+                assert !op.appliedMixins.get().asFile.exists()
+            }
+            def game = selectedGame(c).asFile
+            def runtime = configurations.getByName(c.sourceSet.runtimeClasspathConfigurationName).incoming.artifactView { componentFilter { !(it instanceof ProjectComponentIdentifier) } }.files.files + [c.finalMinecraftFile.get().asFile] + c.runtimeExtraClasspathFiles.get()*.asFile
+            assert !runtime.any { it.path.contains('mixinStripped') }
+            assert inputs.files.files.containsAll(view.files.files + c.compileMinecraftFiles.get()*.asFile)
+            [compilation:c.toString(), sourceSetName:c.sourceSet.name, enabled:c.target.mixinPreapplication.get(), side:c.preapplicationSide.get(),
+                game:game.path, games:c.compileMinecraftFiles.get()*.asFile*.path, shards:(c.target.mixinPreapplication.get() ? c.preapplyMixinsTasks.get() : []).collect { p -> def t=p.get(); [operation:t.path, raw:t.inputFile.get().asFile.path, produced:t.outputFile.get().asFile.path, notification:t.appliedMixins.get().asFile.path, producers:deps(p.flatMap { it.appliedMixins })] }, runtimeGame:c.finalMinecraftFile.get().asFile.path, runtimeExtras:c.runtimeExtraClasspathFiles.get()*.asFile*.path,
+                runtime:runtime*.path, C:C.incoming.artifacts.artifacts.collect(artifact), view:view.artifacts.artifacts.collect(artifact), raw:raw.artifacts.artifacts.collect(artifact),
+                Cdeps:deps(C), viewDeps:deps(view.files), sourceSetDeps:deps(c.sourceSet.compileClasspath), sourceSet:c.sourceSet.compileClasspath.files*.path,
+                notification:op.appliedMixins.get().asFile.path, produced:op.outputFile.get().asFile.path, parameters:parameters[c.toString()], cleanSources:clean]
+        }
+        def commonRows = expected.collect { c, ps ->
+            def name = 'createCommon' + (c.featureName == null ? '' : c.featureName.capitalize()) + 'ApiStub'
+            def stub = tasks.named(name).get()
+            def jars = fileTree(stub.outputDirectory).files
+            assert !jars.empty && inputs.files.files.containsAll(jars)
+            jars.each { jar -> new ZipFile(jar).withCloseable { z ->
+                def entry = z.getEntry('named/Game.class')
+                if (entry != null) {
+                    def bytes = new String(z.getInputStream(entry).bytes, 'ISO-8859-1')
+                    assert bytes.contains('probe/Ref') == right.mixinPreapplication.get()
+                }
+            } }
+            [sourceSet:c.sourceSet.name, participants:ps*.toString(), task:stub.path, files:jars*.path, producer:deps(fileTree(stub.outputDirectory).builtBy(stub)),
+                sourceSetFiles:c.sourceSet.compileClasspath.files*.path, sourceSetDeps:deps(c.sourceSet.compileClasspath)]
+        }
+        file('full-model-observation.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([compilations:rows, common:commonRows, graph:gradle.taskGraph.allTasks*.path, syncFiles:inputs.files.files*.path]))
+        println 'VERIFIED_FULL_MODEL_INPUTS ' + rows.size() + ' ' + commonRows.size()
+    }
+}

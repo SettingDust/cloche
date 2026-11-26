@@ -25,6 +25,22 @@ internal fun Project.createCompilationVariants(
         if (compilation.withSources) {
             java.withSourcesJar()
         }
+
+        val compilationCapability = compilation.capability
+
+        configurations.named(sourceSet.apiElementsConfigurationName) {
+            outgoing {
+                capability("${project.group}:${project.name}:${project.version}")
+                capability(compilationCapability)
+            }
+        }
+
+        configurations.named(sourceSet.runtimeElementsConfigurationName) {
+            outgoing {
+                capability("${project.group}:${project.name}:${project.version}")
+                capability(compilationCapability)
+            }
+        }
     } else {
         requireGroup()
 
@@ -47,13 +63,7 @@ internal fun Project.createCompilationVariants(
         }
 
         // We cannot use lazy capabilities in FeatureSpec yet, thus manually add lazy extra capability to all relevant configurations
-        val baseCapabilityName = compilation.target.capabilitySuffix?.let {
-            "${project.name}-$it"
-        } ?: project.name
-
-        val compilationCapability = compilation.capabilitySuffix.map {
-            "${project.group}:$baseCapabilityName-$it:${project.version}"
-        }.orElse("${project.group}:$baseCapabilityName:${project.version}")
+        val compilationCapability = compilation.capability
 
         val configurationNames = listOf(
             sourceSet.apiElementsConfigurationName,
@@ -68,17 +78,13 @@ internal fun Project.createCompilationVariants(
             attributes {
                 attribute(TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE, objects.named(TargetJvmEnvironment.STANDARD_JVM))
 
-                plugins.withId(ClochePlugin.Companion.KOTLIN_JVM_PLUGIN_ID) {
+                plugins.withId(ClochePlugin.KOTLIN_JVM_PLUGIN_ID) {
                     attribute(KotlinPlatformType.attribute, KotlinPlatformType.jvm)
                 }
             }
         }
     }
 
-    createExternalDependencyConfigurations(sourceSet)
-}
-
-internal fun Project.createExternalDependencyConfigurations(sourceSet: SourceSet) {
     if (sourceSet.externalRuntimeConfigurationName !in configurations.names) {
         configurations.dependencyScope(sourceSet.externalRuntimeConfigurationName)
     }

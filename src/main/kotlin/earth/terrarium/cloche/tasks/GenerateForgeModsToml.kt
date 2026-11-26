@@ -5,7 +5,12 @@ import earth.terrarium.cloche.api.metadata.ForgeMetadata
 import earth.terrarium.cloche.api.metadata.custom.convertToTomlFromSerializable
 import earth.terrarium.cloche.metadata.forgeTomlMetadataAction
 import earth.terrarium.cloche.modId
-import earth.terrarium.cloche.tasks.data.*
+import earth.terrarium.cloche.tasks.data.ForgeMod
+import earth.terrarium.cloche.tasks.data.ForgeMods
+import earth.terrarium.cloche.tasks.data.MetadataFileProvider
+import earth.terrarium.cloche.tasks.data.NeoForgeMods
+import earth.terrarium.cloche.tasks.data.encodeToStream
+import earth.terrarium.cloche.tasks.data.toml
 import net.msrandom.minecraftcodev.core.utils.getAsPath
 import net.peanuuutz.tomlkt.TomlTable
 import org.gradle.api.Action
@@ -13,7 +18,6 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
-import org.gradle.api.tasks.*
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
@@ -166,7 +170,6 @@ abstract class GenerateForgeModsToml : DefaultTask() {
             displayURL = metadata.url.orNull,
             credits = credits,
             authors = authors,
-            modproperties = modProperties,
         )
 
         if (neoforge.get()) {
@@ -192,6 +195,7 @@ abstract class GenerateForgeModsToml : DefaultTask() {
                 mods = listOf(mod),
                 dependencies = mapOf(modId to dependencies),
                 logoBlur = metadata.blurLogo.orNull,
+                modproperties = mapOf(modId to modProperties)
             )
 
             output.outputStream().use {
@@ -216,6 +220,7 @@ abstract class GenerateForgeModsToml : DefaultTask() {
                 mods = listOf(mod),
                 dependencies = mapOf(modId to dependencies),
                 logoBlur = metadata.blurLogo.orNull,
+                modproperties = mapOf(modId to modProperties)
             )
 
             output.outputStream().use {
